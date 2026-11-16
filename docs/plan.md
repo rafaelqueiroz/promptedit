@@ -169,6 +169,8 @@ Run `sail composer test` (pint + phpstan + phpunit).
 
 ## Decisions to defend in the interview
 
+- Email verification is off (`config/fortify.php`): no mail transport is configured on Laravel Cloud, and a reviewer who registers must be able to generate immediately. `MustVerifyEmail` and the `verified` middleware are removed accordingly; `ProfileController` still clears `email_verified_at` on an email change, so re-enabling it is a one-line change.
+
 - Exact decimals (`numeric` + bcmath) instead of integer cents: rates are fractions of a cent and the unit is dictated by Pixelforge's rate table, not by us.
 - Rounding up the user price: our markup never rounds below our own cost.
 - Idempotency enforced by unique constraints (`webhook_events.provider_event_id`, `credit_transactions.idempotency_key`) plus a row lock, not by "check then insert".

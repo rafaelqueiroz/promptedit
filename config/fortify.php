@@ -163,7 +163,10 @@ return [
     'features' => [
         Features::registration(),
         Features::resetPasswords(),
-        Features::emailVerification(),
+        // Email verification is intentionally off: this is an assessment app and
+        // reviewers sign up and generate immediately, with no mail transport
+        // configured. Re-enable by restoring Features::emailVerification() and
+        // the MustVerifyEmail contract on the User model.
         Features::twoFactorAuthentication([
             'confirm' => true,
             'confirmPassword' => true,

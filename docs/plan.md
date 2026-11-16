@@ -2,7 +2,22 @@
 
 Source: [assessment.md](assessment.md). Priority order from the brief: **correct money → robustness → UX → code quality**. The required part is sized at 2–4 h; stretch goals come after it works end to end.
 
-Items marked **[confirm]** depend on details in the Pixelforge API docs and must be checked before coding that step.
+**Pixelforge API confirmed 2026-11-16** against the live docs and a real generation. The former **[confirm]** items are resolved and recorded in `config/pricing.php`, `config/pixelforge.php` and `config/services.php`; see "Verified facts" below.
+
+## Verified facts
+
+- Base URL `https://pixelforge.promptedit.dev`, bearer auth, `POST /v1/generations` returns **202**.
+- Rates, **per 1,000,000 tokens**: input text `5.00`, input image `10.00`, output `40.00`, reasoning `12.50`.
+- Qualities are `low` / `medium` / `high`; sizes `1024x1024`, `1536x1024`, `1024x1536`.
+- Output tokens are **fixed per size+quality** and so are known up front; **reasoning tokens are the post-completion unknown** (ranges per quality). The estimate uses the range midpoint.
+- `GET /v1/usage` reports `cost_usd` to **9 decimal places**, which is why `Money::SCALE` is 9.
+- Reference images cost exactly 765 input image tokens each, max 4.
+- Webhook signature: `Pixelforge-Signature: t=<ts>,v1=<hex>`, HMAC-SHA256 over `<ts>.<raw body>`, 300s tolerance. Event id is in the body (`id`) and the `Pixelforge-Event-Id` header.
+- Retry schedule 10s, 30s, 2m, 10m, 15m (6 attempts); must answer 2xx within 10s.
+- `Idempotency-Key` is supported on create: same key + same params replays the original response, so a retried submit cannot double-bill.
+- Image URLs expire 24h after completion.
+
+**End-to-end check:** generation `gen_01M7JXVTM098MKX00V6JFJ1EJ7` (12 input text, 280 output, 122 reasoning tokens) cost `0.012785000` per `GET /v1/usage`, and `PricingCalculator` reproduces that string exactly.
 
 ## Architecture at a glance
 
@@ -24,8 +39,9 @@ One code path (`ApplyProviderResult`) applies a provider state to a generation, 
 ## Phase 0 — Groundwork (~20 min)
 
 - Pixelforge account; **two API keys**: `local` (webhook URL = tunnel) and `cloud` (webhook URL = Laravel Cloud app). One key per environment keeps `GET /v1/usage` comparable per deployment.
-- `config/pixelforge.php` → `base_url`, `api_key`, `webhook_secret`, `max_reference_images`. Env: `PIXELFORGE_API_KEY`, `PIXELFORGE_WEBHOOK_SECRET`, `PIXELFORGE_BASE_URL`. **(done)**
-- `config/pricing.php` → token rates per size/quality, reference-image rate, prompt rate, `markup => '1.25'`. **All as strings**, never floats. **[confirm]** the published rate table and its unit (per token / per 1M tokens).
+- Credentials in `config/services.php` under `pixelforge` (`base_url`, `key`, `webhook_secret`, `timeout`) — Laravel's documented home for third-party credentials. Env: `PIXELFORGE_API_KEY`, `PIXELFORGE_WEBHOOK_SECRET`, `PIXELFORGE_BASE_URL`, `PIXELFORGE_TIMEOUT`. **(done)**
+- `config/pixelforge.php` keeps only fixed API constraints that validation and the UI read (`max_reference_images`, `max_prompt_characters`, `webhook_tolerance_seconds`) — facts about the API, not environment configuration. **(done)**
+- `config/pricing.php` → the rate table **per 1,000,000 tokens** mirroring `GET /v1/pricing`, the fixed output-token counts per size+quality, the reasoning ranges, and `markup => '1.25'`. **All as strings**, never floats. **(done; verified against the live API)**
 - Laravel Cloud: add env vars, run **`php artisan horizon`** as a single background process (it manages the workers itself) and enable the **scheduler** — both are needed: submission runs in the queue, reconciliation on the schedule. **(Horizon installed 2026-11-16: Redis queues `generations` + `default`, dashboard gated on `is_admin`.)**
 - Local: `sail up`, tunnel on port 80 (Expose/ngrok/cloudflared), paste the tunnel URL into the local key's webhook URL.
 
@@ -34,7 +50,7 @@ One code path (`ApplyProviderResult`) applies a provider state to a generation, 
 Rule: no floats anywhere money is computed or stored.
 
 - Postgres `numeric(14,8)` columns (exact; 8 decimals = 1/1,000,000 of a cent, ample for "fractions of a cent").
-- `App\Pricing\Money` — immutable value object wrapping a decimal string; `add`, `multiply(int)`, `markedUp()` (rounds up), `equals` via **bcmath** at scale 8. Rates come from config as strings. **(done; rates in `config/pricing.php` are placeholders until the docs are in)**
+- `App\Pricing\Money` — immutable value object wrapping a decimal string; `add`, `multiply(int)`, `divide(int)`, `markedUp()` (rounds up), `equals` via **bcmath** at **scale 9** (Pixelforge reports 9 decimals, and one reasoning token bills at `0.000015625`). Rates come from config as strings. **(done)**
 - `App\Pricing\PricingCalculator`
     - `providerCost(Usage $usage, size, quality): Money` — `Σ tokens × rate` from the actual usage reported by Pixelforge. This must reproduce Pixelforge's own number exactly; it is what the admin report is compared against.
     - `userPrice(Money $providerCost): Money` — `cost × 1.25`, **rounded up** to 8 decimals (never rounds below our cost). Rounding policy documented in the class and covered by a test.
@@ -65,7 +81,7 @@ Rule: no floats anywhere money is computed or stored.
 
 `users` → `is_admin` boolean (for the admin report and Horizon). **(done)**
 
-## Phase 3 — Pixelforge client (~30 min)
+## Phase 3 — Pixelforge client (~30 min) — **done 2026-11-16**
 
 `App\Services\Pixelforge\PixelforgeClient` using the `Http` facade with `baseUrl`, bearer token, `timeout`, `acceptJson`.
 

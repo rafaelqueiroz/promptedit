@@ -23,9 +23,9 @@ const props = defineProps<{
     options: GenerationOptions;
     estimates: EstimateTable;
     maxReferenceImages: number;
+    defaults: { size: string; quality: string };
     samplePrompts: string[];
     canResetPassword: boolean;
-    passwordRules: string;
 }>();
 
 const page = usePage();
@@ -36,8 +36,8 @@ const { resolvedAppearance, updateAppearance } = useAppearance();
 
 const draft = ref<GenerationDraft>({
     prompt: '',
-    size: props.options.sizes[0]?.value ?? '',
-    quality: props.options.qualities[0]?.value ?? '',
+    size: props.defaults.size,
+    quality: props.defaults.quality,
     referenceImageUrls: [],
 });
 
@@ -379,7 +379,6 @@ function submit(current: GenerationDraft) {
             v-model:open="auth.open"
             v-model:mode="auth.mode"
             :can-reset-password="canResetPassword"
-            :password-rules="passwordRules"
             :reason="auth.reason"
         />
     </div>

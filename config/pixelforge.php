@@ -4,22 +4,22 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Pixelforge
+    | Pixelforge API constraints
     |--------------------------------------------------------------------------
     |
-    | Credentials and limits for the Pixelforge image-generation API. Create
-    | one API key per environment: each key has its own webhook URL and
-    | signing secret, and GET /v1/usage reports each key separately.
+    | Fixed facts about the Pixelforge API that validation rules and the UI
+    | read. These are not configuration: they mirror the published API and do
+    | not vary by environment, so they have no env vars.
+    |
+    | Credentials live in config/services.php under 'pixelforge'.
     |
     */
 
-    'base_url' => env('PIXELFORGE_BASE_URL', 'https://api.pixelforge.dev'),
-
-    'api_key' => env('PIXELFORGE_API_KEY'),
-
-    'webhook_secret' => env('PIXELFORGE_WEBHOOK_SECRET'),
-
-    // [confirm] against the Pixelforge docs.
     'max_reference_images' => 4,
+
+    'max_prompt_characters' => 4000,
+
+    // Pixelforge rejects webhook timestamps older than this.
+    'webhook_tolerance_seconds' => 300,
 
 ];

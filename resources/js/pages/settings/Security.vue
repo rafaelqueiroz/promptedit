@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Form, Head } from '@inertiajs/vue3';
+import { Form, Head, usePage } from '@inertiajs/vue3';
 import SecurityController from '@/actions/App/Http/Controllers/Settings/SecurityController';
 import Heading from '@/components/Heading.vue';
 import InputError from '@/components/InputError.vue';
@@ -12,13 +12,11 @@ import ManagePasskeys from '@/components/ManagePasskeys.vue';
 import type { Props as ManageTwoFactorProps } from '@/components/ManageTwoFactor.vue';
 import ManageTwoFactor from '@/components/ManageTwoFactor.vue';
 
-// oxfmt-ignore
-type Props = {
-    passwordRules: string;
-} & ManagePasskeysProps &
-    ManageTwoFactorProps;
+type Props = ManagePasskeysProps & ManageTwoFactorProps;
 
 const props = defineProps<Props>();
+
+const page = usePage();
 
 defineOptions({
     layout: {
@@ -78,7 +76,7 @@ defineOptions({
                     class="mt-1 block w-full"
                     autocomplete="new-password"
                     placeholder="New password"
-                    :passwordrules="props.passwordRules"
+                    :passwordrules="page.props.passwordRules"
                 />
                 <InputError :message="errors.password" />
             </div>
@@ -91,7 +89,7 @@ defineOptions({
                     class="mt-1 block w-full"
                     autocomplete="new-password"
                     placeholder="Confirm password"
-                    :passwordrules="props.passwordRules"
+                    :passwordrules="page.props.passwordRules"
                 />
                 <InputError :message="errors.password_confirmation" />
             </div>

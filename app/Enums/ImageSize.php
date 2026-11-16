@@ -2,7 +2,6 @@
 
 namespace App\Enums;
 
-// [confirm] the sizes Pixelforge actually accepts.
 enum ImageSize: string
 {
     case Square = '1024x1024';

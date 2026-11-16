@@ -14,10 +14,16 @@ use Stringable;
  */
 final readonly class Money implements JsonSerializable, Stringable
 {
-    public const int SCALE = 8;
+    /**
+     * Pixelforge reports costs to 9 decimal places (GET /v1/usage returns e.g.
+     * "0.012785000"), and a user price is a cost x 1.25, which can need a 9th
+     * decimal of its own: one reasoning token costs 0.0000125 and bills at
+     * 0.000015625. Nine places represents both exactly.
+     */
+    public const int SCALE = 9;
 
     /** The smallest representable amount, used to round up. */
-    private const string UNIT = '0.00000001';
+    private const string UNIT = '0.000000001';
 
     /**
      * @param  numeric-string  $amount
@@ -53,6 +59,23 @@ final readonly class Money implements JsonSerializable, Stringable
     public function multiply(int $quantity): self
     {
         return new self(bcmul($this->amount, (string) $quantity, self::SCALE));
+    }
+
+    /**
+     * Divide by a whole number, e.g. converting a per-1,000,000-token rate
+     * into a per-token amount.
+     *
+     * Exact for the rates in use: the extra working precision means the
+     * division is carried out well below the scale before being brought back,
+     * so no value is silently truncated mid-calculation.
+     */
+    public function divide(int $divisor): self
+    {
+        if ($divisor === 0) {
+            throw new InvalidArgumentException('Cannot divide money by zero.');
+        }
+
+        return new self(bcdiv($this->amount, (string) $divisor, self::SCALE));
     }
 
     /**

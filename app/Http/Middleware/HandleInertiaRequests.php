@@ -3,6 +3,7 @@
 namespace App\Http\Middleware;
 
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rules\Password;
 use Inertia\Middleware;
 
 class HandleInertiaRequests extends Middleware
@@ -42,6 +43,9 @@ class HandleInertiaRequests extends Middleware
                 'user' => $request->user(),
             ],
             'sidebarOpen' => ! $request->hasCookie('sidebar_state') || $request->cookie('sidebar_state') === 'true',
+            // Every page with a password field needs these, and they are the
+            // same everywhere. A closure keeps it off partial reloads.
+            'passwordRules' => fn (): string => Password::defaults()->toPasswordRulesString(),
         ];
     }
 }

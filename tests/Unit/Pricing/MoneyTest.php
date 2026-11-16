@@ -11,11 +11,11 @@ use PHPUnit\Framework\TestCase;
 class MoneyTest extends TestCase
 {
     #[Test]
-    public function it_normalises_to_eight_decimals(): void
+    public function it_normalises_to_nine_decimals(): void
     {
-        $this->assertSame('0.05000000', (string) Money::of('0.05'));
-        $this->assertSame('3.00000000', (string) Money::of(3));
-        $this->assertSame('0.00000000', (string) Money::zero());
+        $this->assertSame('0.050000000', (string) Money::of('0.05'));
+        $this->assertSame('3.000000000', (string) Money::of(3));
+        $this->assertSame('0.000000000', (string) Money::zero());
     }
 
     #[Test]
@@ -29,8 +29,8 @@ class MoneyTest extends TestCase
     #[Test]
     public function it_adds_and_multiplies_exactly(): void
     {
-        $this->assertSame('0.00016000', (string) Money::of('0.000005')->multiply(32));
-        $this->assertSame('0.04240000', (string) Money::of('0.00016')->add(Money::of('0.04224')));
+        $this->assertSame('0.000160000', (string) Money::of('0.000005')->multiply(32));
+        $this->assertSame('0.042400000', (string) Money::of('0.00016')->add(Money::of('0.04224')));
     }
 
     /**
@@ -39,10 +39,14 @@ class MoneyTest extends TestCase
     public static function markupCases(): array
     {
         return [
-            'exact result is unchanged' => ['0.04240000', '0.05300000'],
-            'fraction below the scale rounds up' => ['0.00000001', '0.00000002'],
-            'never rounds down' => ['0.00000003', '0.00000004'],
-            'zero stays zero' => ['0', '0.00000000'],
+            'exact result is unchanged' => ['0.042400000', '0.053000000'],
+            // One reasoning token: 0.0000125 x 1.25 = 0.000015625, exact at 9dp.
+            'nine decimals are exact' => ['0.0000125', '0.000015625'],
+            // Below the scale, the remainder must push the price UP so the
+            // markup never settles below our own cost.
+            'fraction below the scale rounds up' => ['0.000000001', '0.000000002'],
+            'never rounds down' => ['0.000000003', '0.000000004'],
+            'zero stays zero' => ['0', '0.000000000'],
         ];
     }
 
@@ -72,6 +76,6 @@ class MoneyTest extends TestCase
     #[Test]
     public function it_serialises_to_a_decimal_string(): void
     {
-        $this->assertSame('{"price":"0.05300000"}', json_encode(['price' => Money::of('0.053')]));
+        $this->assertSame('{"price":"0.053000000"}', json_encode(['price' => Money::of('0.053')]));
     }
 }

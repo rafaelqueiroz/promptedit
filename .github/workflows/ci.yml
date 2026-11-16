@@ -1,0 +1,139 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PHP_VERSION: '8.5'
+  NODE_VERSION: '24'
+
+jobs:
+  backend:
+    name: PHP (Pint, PHPStan, Rector, PHPUnit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      pgsql:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: testing
+          POSTGRES_USER: sail
+          POSTGRES_PASSWORD: password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sail -d testing"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DB_CONNECTION: pgsql
+      DB_HOST: 127.0.0.1
+      DB_PORT: 5432
+      DB_DATABASE: testing
+      DB_USERNAME: sail
+      DB_PASSWORD: password
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ env.PHP_VERSION }}
+          extensions: bcmath, intl, pdo_pgsql, pgsql, redis, gd, zip
+          coverage: none
+
+      - name: Install Composer dependencies
+        uses: ramsey/composer-install@v3
+        with:
+          composer-options: --prefer-dist --no-progress
+
+      - name: Validate composer.json and composer.lock
+        run: composer validate --strict
+
+      - name: Prepare environment
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+
+      - name: Code style (Pint)
+        run: composer lint:check
+
+      - name: Static analysis (PHPStan)
+        run: composer types:check
+
+      - name: Refactoring rules (Rector)
+        run: composer refactor:check
+
+      # Abandoned packages are reported but do not fail the build; only
+      # security advisories do.
+      - name: Security audit (Composer)
+        run: composer audit --abandoned=report
+
+      - name: Tests (PHPUnit)
+        run: php artisan test
+
+  frontend:
+    name: Frontend (lint, types, build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      # PHP is needed so Wayfinder can generate the typed route helpers
+      # that the TypeScript sources import.
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ env.PHP_VERSION }}
+          coverage: none
+
+      - name: Install Composer dependencies
+        uses: ramsey/composer-install@v3
+        with:
+          composer-options: --prefer-dist --no-progress
+
+      - name: Prepare environment
+        run: cp .env.example .env
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      # --with-form matches formVariants: true in vite.config.ts; the Vue
+      # components call the .form() helpers it emits.
+      - name: Generate Wayfinder route helpers
+        run: php artisan wayfinder:generate --with-form
+
+      - name: Lint and format check (vite-plus)
+        run: npm run check
+
+      - name: Type check (vue-tsc)
+        run: npm run types:check
+
+      - name: Build
+        run: npm run build
+
+      - name: Security audit (npm)
+        run: npm audit --audit-level=high

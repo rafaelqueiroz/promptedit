@@ -30,6 +30,10 @@ const props = withDefaults(
 
 const draft = defineModel<GenerationDraft>({ required: true });
 
+// Bound rather than a static attribute: vue-tsc 3.3 mangles `//` inside
+// static string attributes on components, which breaks type-checking the loop.
+const referenceImagePlaceholder = 'https://example.com/reference.jpg';
+
 const emit = defineEmits<{
     submit: [draft: GenerationDraft];
 }>();
@@ -110,16 +114,15 @@ function submit() {
                 Reference images
             </p>
             <div
-                v-for="(url, index) in draft.referenceImageUrls"
+                v-for="index in draft.referenceImageUrls.keys()"
                 :key="index"
-                :data-url="url"
                 class="flex items-center gap-2"
             >
                 <Input
                     v-model="draft.referenceImageUrls[index]"
                     type="url"
                     inputmode="url"
-                    placeholder="https://example.com/reference.jpg"
+                    :placeholder="referenceImagePlaceholder"
                     class="h-8 text-sm"
                 />
                 <Button

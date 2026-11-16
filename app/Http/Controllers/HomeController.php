@@ -6,7 +6,6 @@ use App\Enums\ImageQuality;
 use App\Enums\ImageSize;
 use App\Pricing\PriceTable;
 use App\Pricing\PricingCalculator;
-use Illuminate\Validation\Rules\Password;
 use Inertia\Inertia;
 use Inertia\Response;
 use Laravel\Fortify\Features;
@@ -31,9 +30,10 @@ class HomeController extends Controller
             ],
             'estimates' => (new PriceTable($pricing, $maxReferenceImages))->build(),
             'maxReferenceImages' => $maxReferenceImages,
+            // Pixelforge's own default, and the sensible middle option.
+            'defaults' => ['size' => ImageSize::Square->value, 'quality' => ImageQuality::Medium->value],
             'samplePrompts' => self::SAMPLE_PROMPTS,
             'canResetPassword' => Features::enabled(Features::resetPasswords()),
-            'passwordRules' => Password::defaults()->toPasswordRulesString(),
         ]);
     }
 }

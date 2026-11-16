@@ -20,11 +20,13 @@ class HomeTest extends TestCase
             ->assertInertia(fn (Assert $page): Assert => $page
                 ->component('Welcome')
                 ->has('options.sizes', 3)
-                ->has('options.qualities', 2)
+                ->has('options.qualities', 3)
                 ->where('maxReferenceImages', 4)
-                ->has('estimates.1024x1024.standard', 5)
-                ->where('estimates.1024x1024.standard.0', '0.05300000')
+                ->where('defaults.quality', 'medium')
+                ->has('estimates.1024x1024.low', 5)
+                ->where('estimates.1024x1024.low.0', '0.017906250')
                 ->has('samplePrompts')
+                // Shared by HandleInertiaRequests, not the controller.
                 ->has('passwordRules'),
             );
     }

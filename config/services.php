@@ -14,6 +14,13 @@ return [
     |
     */
 
+    'pixelforge' => [
+        'base_url' => rtrim((string) env('PIXELFORGE_BASE_URL', 'https://pixelforge.promptedit.dev'), '/'),
+        'key' => env('PIXELFORGE_API_KEY'),
+        'webhook_secret' => env('PIXELFORGE_WEBHOOK_SECRET'),
+        'timeout' => (int) env('PIXELFORGE_TIMEOUT', 15),
+    ],
+
     'postmark' => [
         'key' => env('POSTMARK_API_KEY'),
     ],

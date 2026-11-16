@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Form } from '@inertiajs/vue3';
+import { Form, usePage } from '@inertiajs/vue3';
 import InputError from '@/components/InputError.vue';
 import PasswordInput from '@/components/PasswordInput.vue';
 import TextLink from '@/components/TextLink.vue';
@@ -22,10 +22,11 @@ import type { AuthMode } from '@/types';
 
 defineProps<{
     canResetPassword: boolean;
-    passwordRules: string;
     /** Shown instead of the default description, e.g. why signing in is needed right now. */
     reason?: string;
 }>();
+
+const page = usePage();
 
 const open = defineModel<boolean>('open', { required: true });
 const mode = defineModel<AuthMode>('mode', { default: 'login' });
@@ -164,7 +165,7 @@ const mode = defineModel<AuthMode>('mode', { default: 'login' });
                         required
                         autocomplete="new-password"
                         placeholder="Password"
-                        :passwordrules="passwordRules"
+                        :passwordrules="page.props.passwordRules"
                     />
                     <InputError :message="errors.password" />
                 </div>
@@ -179,7 +180,7 @@ const mode = defineModel<AuthMode>('mode', { default: 'login' });
                         required
                         autocomplete="new-password"
                         placeholder="Confirm password"
-                        :passwordrules="passwordRules"
+                        :passwordrules="page.props.passwordRules"
                     />
                     <InputError :message="errors.password_confirmation" />
                 </div>

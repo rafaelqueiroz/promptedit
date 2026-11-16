@@ -6,7 +6,9 @@ use App\Enums\ImageQuality;
 use App\Enums\ImageSize;
 use App\Pricing\Money;
 use App\Pricing\PricingCalculator;
+use App\Services\Pixelforge\Data\TokenUsage;
 use InvalidArgumentException;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
@@ -16,55 +18,143 @@ class PricingCalculatorTest extends TestCase
 
     protected function setUp(): void
     {
-        // Deliberately not config/pricing.php: these tests pin the arithmetic,
-        // not the rates, so swapping in Pixelforge's real table must not break them.
+        // The real rate table, mirroring GET /v1/pricing. Inlined rather than
+        // read from config so these tests pin the arithmetic itself.
         $this->pricing = new PricingCalculator([
             'markup' => '1.25',
             'rates' => [
-                'prompt' => '0.000005',
-                'reference_image' => '0.00001',
-                'output' => '0.00004',
+                'input_text_tokens' => '5.00',
+                'input_image_tokens' => '10.00',
+                'output_tokens' => '40.00',
+                'reasoning_tokens' => '12.50',
             ],
+            'rate_unit_tokens' => 1_000_000,
             'estimate_tokens' => [
-                'prompt' => 32,
-                'reference_image' => 765,
+                'characters_per_text_token' => 4,
+                'per_reference_image' => 765,
                 'output' => [
-                    '1024x1024' => ['standard' => 1056, 'high' => 4160],
-                    '1024x1536' => ['standard' => 1584, 'high' => 6240],
-                    '1536x1024' => ['standard' => 1584, 'high' => 6240],
+                    'low' => ['1024x1024' => 280, '1536x1024' => 420, '1024x1536' => 420],
+                    'medium' => ['1024x1024' => 1100, '1536x1024' => 1650, '1024x1536' => 1650],
+                    'high' => ['1024x1024' => 4300, '1536x1024' => 6450, '1024x1536' => 6450],
+                ],
+                'reasoning' => [
+                    'low' => ['min' => 0, 'max' => 500],
+                    'medium' => ['min' => 200, 'max' => 2000],
+                    'high' => ['min' => 1000, 'max' => 8000],
                 ],
             ],
         ]);
     }
 
+    /**
+     * The number this whole exercise turns on: our provider cost must equal
+     * what Pixelforge reports. These are the real figures from a generation
+     * run against the live API on 2026-11-16 (gen_01M7JXVTM098MKX00V6JFJ1EJ7),
+     * whose GET /v1/usage row read exactly "0.012785000".
+     */
     #[Test]
-    public function it_estimates_from_typical_token_counts(): void
+    public function it_reproduces_the_cost_pixelforge_reports(): void
     {
-        // 32 × 0.000005 + 1056 × 0.00004 = 0.00016 + 0.04224
-        $estimate = $this->pricing->estimate(ImageSize::Square, ImageQuality::Standard);
+        $usage = new TokenUsage(
+            inputTextTokens: 12,
+            inputImageTokens: 0,
+            outputTokens: 280,
+            reasoningTokens: 122,
+            totalTokens: 414,
+        );
 
-        $this->assertSame('0.04240000', (string) $estimate->providerCost);
-        $this->assertSame('0.05300000', (string) $estimate->userPrice);
+        $this->assertSame('0.012785000', (string) $this->pricing->providerCostForUsage($usage));
     }
 
     #[Test]
-    public function reference_images_raise_the_estimate(): void
+    public function the_user_pays_the_cost_plus_twenty_five_percent(): void
     {
-        // 0.0424 + 765 × 0.00001 = 0.05005 → × 1.25 = 0.0625625
-        $estimate = $this->pricing->estimate(ImageSize::Square, ImageQuality::Standard, referenceImages: 1);
+        $cost = Money::of('0.012785');
 
-        $this->assertSame('0.05005000', (string) $estimate->providerCost);
-        $this->assertSame('0.06256250', (string) $estimate->userPrice);
+        $this->assertSame('0.015981250', (string) $this->pricing->userPrice($cost));
+    }
+
+    /**
+     * Each rate divided by 1,000,000 must survive as an exact per-token
+     * amount. A single token of the oddest rate (12.50) is 0.0000125, and
+     * billing it marks up to 0.000015625 — nine decimal places exactly.
+     */
+    #[Test]
+    public function a_single_token_of_each_type_is_exact(): void
+    {
+        $this->assertSame('0.000005000', (string) $this->pricing->providerCost(['input_text_tokens' => 1]));
+        $this->assertSame('0.000010000', (string) $this->pricing->providerCost(['input_image_tokens' => 1]));
+        $this->assertSame('0.000040000', (string) $this->pricing->providerCost(['output_tokens' => 1]));
+        $this->assertSame('0.000012500', (string) $this->pricing->providerCost(['reasoning_tokens' => 1]));
+
+        $this->assertSame(
+            '0.000015625',
+            (string) $this->pricing->userPrice($this->pricing->providerCost(['reasoning_tokens' => 1])),
+        );
+    }
+
+    /**
+     * Guards the order of operations: tokens x rate is computed before the
+     * division by 1,000,000, so a large token count cannot be truncated by an
+     * intermediate rounding step.
+     */
+    #[Test]
+    public function large_token_counts_stay_exact(): void
+    {
+        $this->assertSame('0.344000000', (string) $this->pricing->providerCost(['output_tokens' => 8600]));
+        $this->assertSame('0.100000000', (string) $this->pricing->providerCost(['reasoning_tokens' => 8000]));
     }
 
     #[Test]
-    public function it_computes_provider_cost_from_reported_usage(): void
+    public function the_estimate_uses_the_midpoint_of_the_reasoning_range(): void
     {
-        $cost = $this->pricing->providerCost(['prompt' => 41, 'reference_image' => 0, 'output' => 1337]);
+        // 1024x1024 low: 280 output, reasoning midpoint 250, prompt "" -> 0 text tokens.
+        // 280 x 40/1M = 0.0112 ; 250 x 12.50/1M = 0.003125 ; total 0.014325
+        $estimate = $this->pricing->estimate(ImageSize::Square, ImageQuality::Low);
 
-        // 41 × 0.000005 + 1337 × 0.00004 = 0.000205 + 0.05348
-        $this->assertSame('0.05368500', (string) $cost);
-        $this->assertSame('0.06710625', (string) $this->pricing->userPrice($cost));
+        $this->assertSame('0.014325000', (string) $estimate->providerCost);
+        $this->assertSame('0.017906250', (string) $estimate->userPrice);
+    }
+
+    #[Test]
+    public function the_prompt_contributes_text_tokens_at_four_characters_each(): void
+    {
+        // 8 characters -> 2 text tokens -> 2 x 5/1M = 0.00001 on top.
+        $bare = $this->pricing->estimate(ImageSize::Square, ImageQuality::Low);
+        $withPrompt = $this->pricing->estimate(ImageSize::Square, ImageQuality::Low, prompt: 'abcdefgh');
+
+        $this->assertSame('0.014335000', (string) $withPrompt->providerCost);
+        $this->assertSame('0.014325000', (string) $bare->providerCost);
+    }
+
+    #[Test]
+    public function each_reference_image_adds_765_input_image_tokens(): void
+    {
+        // 765 x 10/1M = 0.00765 per image.
+        $estimate = $this->pricing->estimate(ImageSize::Square, ImageQuality::Low, referenceImages: 2);
+
+        $this->assertSame('0.029625000', (string) $estimate->providerCost);
+    }
+
+    /**
+     * @return array<string, array{ImageSize, ImageQuality, string}>
+     */
+    public static function qualityCases(): array
+    {
+        return [
+            // output x 40/1M + reasoning midpoint x 12.50/1M
+            'low square' => [ImageSize::Square, ImageQuality::Low, '0.014325000'],
+            'medium square' => [ImageSize::Square, ImageQuality::Medium, '0.057750000'],
+            'high square' => [ImageSize::Square, ImageQuality::High, '0.228250000'],
+            'high landscape' => [ImageSize::Landscape, ImageQuality::High, '0.314250000'],
+        ];
+    }
+
+    #[Test]
+    #[DataProvider('qualityCases')]
+    public function it_estimates_every_size_and_quality(ImageSize $size, ImageQuality $quality, string $expected): void
+    {
+        $this->assertSame($expected, (string) $this->pricing->estimate($size, $quality)->providerCost);
     }
 
     #[Test]
@@ -72,11 +162,11 @@ class PricingCalculatorTest extends TestCase
     {
         $this->expectException(InvalidArgumentException::class);
 
-        $this->pricing->providerCost(['video' => 10]);
+        $this->pricing->providerCost(['video_tokens' => 10]);
     }
 
     #[Test]
-    public function nothing_costs_nothing(): void
+    public function a_failed_generation_costs_nothing(): void
     {
         $this->assertTrue($this->pricing->userPrice(Money::zero())->isZero());
     }

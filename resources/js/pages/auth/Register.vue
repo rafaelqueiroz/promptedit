@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Form, Head } from '@inertiajs/vue3';
+import { Form, Head, usePage } from '@inertiajs/vue3';
 import InputError from '@/components/InputError.vue';
 import PasswordInput from '@/components/PasswordInput.vue';
 import TextLink from '@/components/TextLink.vue';
@@ -10,9 +10,7 @@ import { Spinner } from '@/components/ui/spinner';
 import { login } from '@/routes';
 import { store } from '@/routes/register';
 
-defineProps<{
-    passwordRules: string;
-}>();
+const page = usePage();
 
 defineOptions({
     layout: {
@@ -70,7 +68,7 @@ defineOptions({
                     autocomplete="new-password"
                     name="password"
                     placeholder="Password"
-                    :passwordrules="passwordRules"
+                    :passwordrules="page.props.passwordRules"
                 />
                 <InputError :message="errors.password" />
             </div>
@@ -84,7 +82,7 @@ defineOptions({
                     autocomplete="new-password"
                     name="password_confirmation"
                     placeholder="Confirm password"
-                    :passwordrules="passwordRules"
+                    :passwordrules="page.props.passwordRules"
                 />
                 <InputError :message="errors.password_confirmation" />
             </div>

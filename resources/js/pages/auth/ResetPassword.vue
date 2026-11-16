@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Form, Head } from '@inertiajs/vue3';
+import { Form, Head, usePage } from '@inertiajs/vue3';
 import { ref } from 'vue';
 import InputError from '@/components/InputError.vue';
 import PasswordInput from '@/components/PasswordInput.vue';
@@ -19,8 +19,9 @@ defineOptions({
 const props = defineProps<{
     token: string;
     email: string;
-    passwordRules: string;
 }>();
+
+const page = usePage();
 
 const inputEmail = ref(props.email);
 </script>
@@ -58,7 +59,7 @@ const inputEmail = ref(props.email);
                     class="mt-1 block w-full"
                     autofocus
                     placeholder="Password"
-                    :passwordrules="passwordRules"
+                    :passwordrules="page.props.passwordRules"
                 />
                 <InputError :message="errors.password" />
             </div>
@@ -71,7 +72,7 @@ const inputEmail = ref(props.email);
                     autocomplete="new-password"
                     class="mt-1 block w-full"
                     placeholder="Confirm password"
-                    :passwordrules="passwordRules"
+                    :passwordrules="page.props.passwordRules"
                 />
                 <InputError :message="errors.password_confirmation" />
             </div>

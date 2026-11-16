@@ -1,0 +1,958 @@
+{
+  "info": {
+    "name": "PromptEdit - Pixelforge webhooks",
+    "description": "Exercises the webhook endpoint and the polling fallback.\n\nSetup:\n1. Set {{app_url}} (http://localhost, or your tunnel URL).\n2. Set {{webhook_secret}} to PIXELFORGE_WEBHOOK_SECRET from .env - requests are signed with it.\n3. Set {{pixelforge_api_key}} for the folder 0 requests that hit the real API.\n\nEvery webhook request is signed automatically by a collection-level pre-request script, so the app's signature check is exercised for real rather than bypassed.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Convenience: {{today}} for the usage endpoint.",
+          "pm.collectionVariables.set('today', new Date().toISOString().slice(0, 10));"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "app_url",
+      "value": "http://localhost",
+      "description": "Your app. Use the tunnel URL when testing real deliveries."
+    },
+    {
+      "key": "webhook_secret",
+      "value": "",
+      "description": "PIXELFORGE_WEBHOOK_SECRET from .env."
+    },
+    {
+      "key": "pixelforge_base_url",
+      "value": "https://pixelforge.promptedit.dev"
+    },
+    {
+      "key": "pixelforge_api_key",
+      "value": "",
+      "description": "Your Pixelforge key. Do not commit a real one."
+    },
+    {
+      "key": "generation_id",
+      "value": "gen_replace_me",
+      "description": "Set automatically by folder 0."
+    },
+    {
+      "key": "event_id",
+      "value": ""
+    },
+    {
+      "key": "pin_ids",
+      "value": ""
+    },
+    {
+      "key": "force_timestamp",
+      "value": ""
+    },
+    {
+      "key": "today",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "0. Setup",
+      "description": "Run these once to get a real generation id to drive the webhook tests with.",
+      "item": [
+        {
+          "name": "Create a generation (real API)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"accepted\", () => pm.response.to.have.status(202));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set(\"generation_id\", body.id);",
+                  "console.log(\"generation_id =\", body.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{pixelforge_api_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"prompt\": \"A lighthouse at dusk, long exposure [slow]\",\n  \"size\": \"1024x1024\",\n  \"quality\": \"low\"\n}"
+            },
+            "url": {
+              "raw": "{{pixelforge_base_url}}/v1/generations",
+              "host": [
+                "{{pixelforge_base_url}}"
+              ],
+              "path": [
+                "v1",
+                "generations"
+              ]
+            },
+            "description": "Uses [slow] so the generation takes 60-90s, leaving time to fire webhooks by hand before the real ones land."
+          }
+        },
+        {
+          "name": "Get the generation (real API)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{pixelforge_api_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{pixelforge_base_url}}/v1/generations/{{generation_id}}",
+              "host": [
+                "{{pixelforge_base_url}}"
+              ],
+              "path": [
+                "v1",
+                "generations",
+                "{{generation_id}}"
+              ]
+            },
+            "description": "What the reconciler polls. Compare its status and usage with what your app stored."
+          }
+        },
+        {
+          "name": "Usage report (real API)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{pixelforge_api_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{pixelforge_base_url}}/v1/usage?start_date={{today}}&end_date={{today}}",
+              "host": [
+                "{{pixelforge_base_url}}"
+              ],
+              "path": [
+                "v1",
+                "usage"
+              ],
+              "query": [
+                {
+                  "key": "start_date",
+                  "value": "{{today}}"
+                },
+                {
+                  "key": "end_date",
+                  "value": "{{today}}"
+                }
+              ]
+            },
+            "description": "Pixelforge's own cost figure. The admin report's provider costs must match cost_usd exactly."
+          }
+        }
+      ]
+    },
+    {
+      "name": "1. Happy path",
+      "description": "The ordinary lifecycle, delivered in order.",
+      "item": [
+        {
+          "name": "generation.processing",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Signs the request body exactly as Pixelforge does:",
+                  "//   Pixelforge-Signature: t=<unix ts>,v1=HMAC_SHA256(\"<ts>.<raw body>\", secret)",
+                  "// Set {{webhook_secret}} to PIXELFORGE_WEBHOOK_SECRET from your .env.",
+                  "const secret = pm.environment.get(\"webhook_secret\") || pm.collectionVariables.get(\"webhook_secret\");",
+                  "",
+                  "if (!secret) {",
+                  "    console.warn(\"webhook_secret is not set - the app will reject this delivery with 401.\");",
+                  "}",
+                  "",
+                  "// Give each run fresh ids unless the request pins them (duplicate tests do).",
+                  "if (!pm.collectionVariables.get(\"pin_ids\")) {",
+                  "    pm.collectionVariables.set(\"event_id\", \"evt_\" + Date.now() + \"_\" + Math.floor(Math.random() * 1e6));",
+                  "}",
+                  "",
+                  "const timestamp = pm.collectionVariables.get(\"force_timestamp\") || Math.floor(Date.now() / 1000);",
+                  "",
+                  "// Resolve {{variables}} first: the signature must cover the exact bytes sent.",
+                  "const rawBody = pm.variables.replaceIn(pm.request.body.raw);",
+                  "",
+                  "const signature = CryptoJS.HmacSHA256(timestamp + \".\" + rawBody, secret).toString(CryptoJS.enc.Hex);",
+                  "",
+                  "pm.request.headers.upsert({ key: \"Pixelforge-Signature\", value: \"t=\" + timestamp + \",v1=\" + signature });",
+                  "pm.request.headers.upsert({ key: \"Pixelforge-Event-Id\", value: pm.collectionVariables.get(\"event_id\") });"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"accepted with 2xx\", () => pm.expect(pm.response.code).to.be.oneOf([200, 202, 204]));",
+                  "pm.test(\"answers within Pixelforge's 10s budget\", () => pm.expect(pm.response.responseTime).to.be.below(10000));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Pixelforge-Event-Type",
+                "value": "generation.processing"
+              },
+              {
+                "key": "Pixelforge-Delivery-Attempt",
+                "value": "1"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{event_id}}\",\n  \"object\": \"event\",\n  \"type\": \"generation.processing\",\n  \"created_at\": \"2026-11-16T19:38:17Z\",\n  \"data\": {\n    \"object\": {\n      \"id\": \"{{generation_id}}\",\n      \"object\": \"generation\",\n      \"status\": \"processing\",\n      \"prompt\": \"A lighthouse at dusk, long exposure\",\n      \"size\": \"1024x1024\",\n      \"quality\": \"low\",\n      \"reference_images\": [],\n      \"metadata\": {},\n      \"image_url\": null,\n      \"image_url_expires_at\": null,\n      \"usage\": null,\n      \"rates\": {\n        \"input_text_tokens\": \"5.00\",\n        \"input_image_tokens\": \"10.00\",\n        \"output_tokens\": \"40.00\",\n        \"reasoning_tokens\": \"12.50\"\n      },\n      \"error\": null,\n      \"created_at\": \"2026-11-16T19:38:08Z\",\n      \"started_at\": \"2026-11-16T19:38:10Z\",\n      \"completed_at\": null\n    }\n  }\n}"
+            },
+            "url": {
+              "raw": "{{app_url}}/webhooks/pixelforge",
+              "host": [
+                "{{app_url}}"
+              ],
+              "path": [
+                "webhooks",
+                "pixelforge"
+              ]
+            },
+            "description": "Moves the generation from queued to processing."
+          }
+        },
+        {
+          "name": "generation.succeeded",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Signs the request body exactly as Pixelforge does:",
+                  "//   Pixelforge-Signature: t=<unix ts>,v1=HMAC_SHA256(\"<ts>.<raw body>\", secret)",
+                  "// Set {{webhook_secret}} to PIXELFORGE_WEBHOOK_SECRET from your .env.",
+                  "const secret = pm.environment.get(\"webhook_secret\") || pm.collectionVariables.get(\"webhook_secret\");",
+                  "",
+                  "if (!secret) {",
+                  "    console.warn(\"webhook_secret is not set - the app will reject this delivery with 401.\");",
+                  "}",
+                  "",
+                  "// Give each run fresh ids unless the request pins them (duplicate tests do).",
+                  "if (!pm.collectionVariables.get(\"pin_ids\")) {",
+                  "    pm.collectionVariables.set(\"event_id\", \"evt_\" + Date.now() + \"_\" + Math.floor(Math.random() * 1e6));",
+                  "}",
+                  "",
+                  "const timestamp = pm.collectionVariables.get(\"force_timestamp\") || Math.floor(Date.now() / 1000);",
+                  "",
+                  "// Resolve {{variables}} first: the signature must cover the exact bytes sent.",
+                  "const rawBody = pm.variables.replaceIn(pm.request.body.raw);",
+                  "",
+                  "const signature = CryptoJS.HmacSHA256(timestamp + \".\" + rawBody, secret).toString(CryptoJS.enc.Hex);",
+                  "",
+                  "pm.request.headers.upsert({ key: \"Pixelforge-Signature\", value: \"t=\" + timestamp + \",v1=\" + signature });",
+                  "pm.request.headers.upsert({ key: \"Pixelforge-Event-Id\", value: pm.collectionVariables.get(\"event_id\") });"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"accepted with 2xx\", () => pm.expect(pm.response.code).to.be.oneOf([200, 202, 204]));",
+                  "pm.test(\"answers within Pixelforge's 10s budget\", () => pm.expect(pm.response.responseTime).to.be.below(10000));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Pixelforge-Event-Type",
+                "value": "generation.succeeded"
+              },
+              {
+                "key": "Pixelforge-Delivery-Attempt",
+                "value": "1"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{event_id}}\",\n  \"object\": \"event\",\n  \"type\": \"generation.succeeded\",\n  \"created_at\": \"2026-11-16T19:38:17Z\",\n  \"data\": {\n    \"object\": {\n      \"id\": \"{{generation_id}}\",\n      \"object\": \"generation\",\n      \"status\": \"succeeded\",\n      \"prompt\": \"A lighthouse at dusk, long exposure\",\n      \"size\": \"1024x1024\",\n      \"quality\": \"low\",\n      \"reference_images\": [],\n      \"metadata\": {},\n      \"image_url\": \"https://pixelforge.promptedit.dev/images/{{generation_id}}.png?expires=1794944297&signature=deadbeef\",\n      \"image_url_expires_at\": \"2026-11-17T19:38:17Z\",\n      \"usage\": {\n        \"input_text_tokens\": 12,\n        \"input_image_tokens\": 0,\n        \"output_tokens\": 280,\n        \"reasoning_tokens\": 122,\n        \"total_tokens\": 414\n      },\n      \"rates\": {\n        \"input_text_tokens\": \"5.00\",\n        \"input_image_tokens\": \"10.00\",\n        \"output_tokens\": \"40.00\",\n        \"reasoning_tokens\": \"12.50\"\n      },\n      \"error\": null,\n      \"created_at\": \"2026-11-16T19:38:08Z\",\n      \"started_at\": \"2026-11-16T19:38:10Z\",\n      \"completed_at\": \"2026-11-16T19:38:17Z\"\n    }\n  }\n}"
+            },
+            "url": {
+              "raw": "{{app_url}}/webhooks/pixelforge",
+              "host": [
+                "{{app_url}}"
+              ],
+              "path": [
+                "webhooks",
+                "pixelforge"
+              ]
+            },
+            "description": "Settles the generation: records actual cost from usage and stores the image URL."
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Duplicate delivery",
+      "description": "Pixelforge delivers at least once. The SAME event id is sent twice; the second must change nothing - no second charge, no second webhook_events row.",
+      "item": [
+        {
+          "name": "Succeeded (first delivery)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Signs the request body exactly as Pixelforge does:",
+                  "//   Pixelforge-Signature: t=<unix ts>,v1=HMAC_SHA256(\"<ts>.<raw body>\", secret)",
+                  "// Set {{webhook_secret}} to PIXELFORGE_WEBHOOK_SECRET from your .env.",
+                  "const secret = pm.environment.get(\"webhook_secret\") || pm.collectionVariables.get(\"webhook_secret\");",
+                  "",
+                  "if (!secret) {",
+                  "    console.warn(\"webhook_secret is not set - the app will reject this delivery with 401.\");",
+                  "}",
+                  "",
+                  "// Give each run fresh ids unless the request pins them (duplicate tests do).",
+                  "if (!pm.collectionVariables.get(\"pin_ids\")) {",
+                  "    pm.collectionVariables.set(\"event_id\", \"evt_\" + Date.now() + \"_\" + Math.floor(Math.random() * 1e6));",
+                  "}",
+                  "",
+                  "const timestamp = pm.collectionVariables.get(\"force_timestamp\") || Math.floor(Date.now() / 1000);",
+                  "",
+                  "// Resolve {{variables}} first: the signature must cover the exact bytes sent.",
+                  "const rawBody = pm.variables.replaceIn(pm.request.body.raw);",
+                  "",
+                  "const signature = CryptoJS.HmacSHA256(timestamp + \".\" + rawBody, secret).toString(CryptoJS.enc.Hex);",
+                  "",
+                  "pm.request.headers.upsert({ key: \"Pixelforge-Signature\", value: \"t=\" + timestamp + \",v1=\" + signature });",
+                  "pm.request.headers.upsert({ key: \"Pixelforge-Event-Id\", value: pm.collectionVariables.get(\"event_id\") });"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"accepted with 2xx\", () => pm.expect(pm.response.code).to.be.oneOf([200, 202, 204]));",
+                  "pm.test(\"answers within Pixelforge's 10s budget\", () => pm.expect(pm.response.responseTime).to.be.below(10000));",
+                  "",
+                  "pm.collectionVariables.set(\"pin_ids\", \"1\");",
+                  "console.log(\"Pinned event_id =\", pm.collectionVariables.get(\"event_id\"), \"- the next request reuses it.\");"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Pixelforge-Event-Type",
+                "value": "generation.succeeded"
+              },
+              {
+                "key": "Pixelforge-Delivery-Attempt",
+                "value": "1"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{event_id}}\",\n  \"object\": \"event\",\n  \"type\": \"generation.succeeded\",\n  \"created_at\": \"2026-11-16T19:38:17Z\",\n  \"data\": {\n    \"object\": {\n      \"id\": \"{{generation_id}}\",\n      \"object\": \"generation\",\n      \"status\": \"succeeded\",\n      \"prompt\": \"A lighthouse at dusk, long exposure\",\n      \"size\": \"1024x1024\",\n      \"quality\": \"low\",\n      \"reference_images\": [],\n      \"metadata\": {},\n      \"image_url\": \"https://pixelforge.promptedit.dev/images/{{generation_id}}.png?expires=1794944297&signature=deadbeef\",\n      \"image_url_expires_at\": \"2026-11-17T19:38:17Z\",\n      \"usage\": {\n        \"input_text_tokens\": 12,\n        \"input_image_tokens\": 0,\n        \"output_tokens\": 280,\n        \"reasoning_tokens\": 122,\n        \"total_tokens\": 414\n      },\n      \"rates\": {\n        \"input_text_tokens\": \"5.00\",\n        \"input_image_tokens\": \"10.00\",\n        \"output_tokens\": \"40.00\",\n        \"reasoning_tokens\": \"12.50\"\n      },\n      \"error\": null,\n      \"created_at\": \"2026-11-16T19:38:08Z\",\n      \"started_at\": \"2026-11-16T19:38:10Z\",\n      \"completed_at\": \"2026-11-16T19:38:17Z\"\n    }\n  }\n}"
+            },
+            "url": {
+              "raw": "{{app_url}}/webhooks/pixelforge",
+              "host": [
+                "{{app_url}}"
+              ],
+              "path": [
+                "webhooks",
+                "pixelforge"
+              ]
+            },
+            "description": "Records the charge. Pins the event id so the next request replays it exactly."
+          }
+        },
+        {
+          "name": "Succeeded (replay - must be ignored)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Signs the request body exactly as Pixelforge does:",
+                  "//   Pixelforge-Signature: t=<unix ts>,v1=HMAC_SHA256(\"<ts>.<raw body>\", secret)",
+                  "// Set {{webhook_secret}} to PIXELFORGE_WEBHOOK_SECRET from your .env.",
+                  "const secret = pm.environment.get(\"webhook_secret\") || pm.collectionVariables.get(\"webhook_secret\");",
+                  "",
+                  "if (!secret) {",
+                  "    console.warn(\"webhook_secret is not set - the app will reject this delivery with 401.\");",
+                  "}",
+                  "",
+                  "// Give each run fresh ids unless the request pins them (duplicate tests do).",
+                  "if (!pm.collectionVariables.get(\"pin_ids\")) {",
+                  "    pm.collectionVariables.set(\"event_id\", \"evt_\" + Date.now() + \"_\" + Math.floor(Math.random() * 1e6));",
+                  "}",
+                  "",
+                  "const timestamp = pm.collectionVariables.get(\"force_timestamp\") || Math.floor(Date.now() / 1000);",
+                  "",
+                  "// Resolve {{variables}} first: the signature must cover the exact bytes sent.",
+                  "const rawBody = pm.variables.replaceIn(pm.request.body.raw);",
+                  "",
+                  "const signature = CryptoJS.HmacSHA256(timestamp + \".\" + rawBody, secret).toString(CryptoJS.enc.Hex);",
+                  "",
+                  "pm.request.headers.upsert({ key: \"Pixelforge-Signature\", value: \"t=\" + timestamp + \",v1=\" + signature });",
+                  "pm.request.headers.upsert({ key: \"Pixelforge-Event-Id\", value: pm.collectionVariables.get(\"event_id\") });"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"accepted with 2xx\", () => pm.expect(pm.response.code).to.be.oneOf([200, 202, 204]));",
+                  "pm.test(\"answers within Pixelforge's 10s budget\", () => pm.expect(pm.response.responseTime).to.be.below(10000));",
+                  "",
+                  "pm.collectionVariables.unset(\"pin_ids\");",
+                  "pm.test(\"still answers 2xx so Pixelforge stops retrying\", () => pm.expect(pm.response.code).to.be.oneOf([200, 202, 204]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Pixelforge-Event-Type",
+                "value": "generation.succeeded"
+              },
+              {
+                "key": "Pixelforge-Delivery-Attempt",
+                "value": "2"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{event_id}}\",\n  \"object\": \"event\",\n  \"type\": \"generation.succeeded\",\n  \"created_at\": \"2026-11-16T19:38:17Z\",\n  \"data\": {\n    \"object\": {\n      \"id\": \"{{generation_id}}\",\n      \"object\": \"generation\",\n      \"status\": \"succeeded\",\n      \"prompt\": \"A lighthouse at dusk, long exposure\",\n      \"size\": \"1024x1024\",\n      \"quality\": \"low\",\n      \"reference_images\": [],\n      \"metadata\": {},\n      \"image_url\": \"https://pixelforge.promptedit.dev/images/{{generation_id}}.png?expires=1794944297&signature=deadbeef\",\n      \"image_url_expires_at\": \"2026-11-17T19:38:17Z\",\n      \"usage\": {\n        \"input_text_tokens\": 12,\n        \"input_image_tokens\": 0,\n        \"output_tokens\": 280,\n        \"reasoning_tokens\": 122,\n        \"total_tokens\": 414\n      },\n      \"rates\": {\n        \"input_text_tokens\": \"5.00\",\n        \"input_image_tokens\": \"10.00\",\n        \"output_tokens\": \"40.00\",\n        \"reasoning_tokens\": \"12.50\"\n      },\n      \"error\": null,\n      \"created_at\": \"2026-11-16T19:38:08Z\",\n      \"started_at\": \"2026-11-16T19:38:10Z\",\n      \"completed_at\": \"2026-11-16T19:38:17Z\"\n    }\n  }\n}"
+            },
+            "url": {
+              "raw": "{{app_url}}/webhooks/pixelforge",
+              "host": [
+                "{{app_url}}"
+              ],
+              "path": [
+                "webhooks",
+                "pixelforge"
+              ]
+            },
+            "description": "Byte-identical replay of the previous event. Must be acknowledged but must NOT charge again. Verify: one row in webhook_events, one charge, unchanged actual cost."
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Out-of-order delivery",
+      "description": "Pixelforge makes no ordering guarantee. A late 'processing' arriving after 'succeeded' must not drag the generation backwards.",
+      "item": [
+        {
+          "name": "Succeeded (arrives first)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Signs the request body exactly as Pixelforge does:",
+                  "//   Pixelforge-Signature: t=<unix ts>,v1=HMAC_SHA256(\"<ts>.<raw body>\", secret)",
+                  "// Set {{webhook_secret}} to PIXELFORGE_WEBHOOK_SECRET from your .env.",
+                  "const secret = pm.environment.get(\"webhook_secret\") || pm.collectionVariables.get(\"webhook_secret\");",
+                  "",
+                  "if (!secret) {",
+                  "    console.warn(\"webhook_secret is not set - the app will reject this delivery with 401.\");",
+                  "}",
+                  "",
+                  "// Give each run fresh ids unless the request pins them (duplicate tests do).",
+                  "if (!pm.collectionVariables.get(\"pin_ids\")) {",
+                  "    pm.collectionVariables.set(\"event_id\", \"evt_\" + Date.now() + \"_\" + Math.floor(Math.random() * 1e6));",
+                  "}",
+                  "",
+                  "const timestamp = pm.collectionVariables.get(\"force_timestamp\") || Math.floor(Date.now() / 1000);",
+                  "",
+                  "// Resolve {{variables}} first: the signature must cover the exact bytes sent.",
+                  "const rawBody = pm.variables.replaceIn(pm.request.body.raw);",
+                  "",
+                  "const signature = CryptoJS.HmacSHA256(timestamp + \".\" + rawBody, secret).toString(CryptoJS.enc.Hex);",
+                  "",
+                  "pm.request.headers.upsert({ key: \"Pixelforge-Signature\", value: \"t=\" + timestamp + \",v1=\" + signature });",
+                  "pm.request.headers.upsert({ key: \"Pixelforge-Event-Id\", value: pm.collectionVariables.get(\"event_id\") });"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"accepted with 2xx\", () => pm.expect(pm.response.code).to.be.oneOf([200, 202, 204]));",
+                  "pm.test(\"answers within Pixelforge's 10s budget\", () => pm.expect(pm.response.responseTime).to.be.below(10000));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Pixelforge-Event-Type",
+                "value": "generation.succeeded"
+              },
+              {
+                "key": "Pixelforge-Delivery-Attempt",
+                "value": "1"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{event_id}}\",\n  \"object\": \"event\",\n  \"type\": \"generation.succeeded\",\n  \"created_at\": \"2026-11-16T19:38:17Z\",\n  \"data\": {\n    \"object\": {\n      \"id\": \"{{generation_id}}\",\n      \"object\": \"generation\",\n      \"status\": \"succeeded\",\n      \"prompt\": \"A lighthouse at dusk, long exposure\",\n      \"size\": \"1024x1024\",\n      \"quality\": \"low\",\n      \"reference_images\": [],\n      \"metadata\": {},\n      \"image_url\": \"https://pixelforge.promptedit.dev/images/{{generation_id}}.png?expires=1794944297&signature=deadbeef\",\n      \"image_url_expires_at\": \"2026-11-17T19:38:17Z\",\n      \"usage\": {\n        \"input_text_tokens\": 12,\n        \"input_image_tokens\": 0,\n        \"output_tokens\": 280,\n        \"reasoning_tokens\": 122,\n        \"total_tokens\": 414\n      },\n      \"rates\": {\n        \"input_text_tokens\": \"5.00\",\n        \"input_image_tokens\": \"10.00\",\n        \"output_tokens\": \"40.00\",\n        \"reasoning_tokens\": \"12.50\"\n      },\n      \"error\": null,\n      \"created_at\": \"2026-11-16T19:38:08Z\",\n      \"started_at\": \"2026-11-16T19:38:10Z\",\n      \"completed_at\": \"2026-11-16T19:38:17Z\"\n    }\n  }\n}"
+            },
+            "url": {
+              "raw": "{{app_url}}/webhooks/pixelforge",
+              "host": [
+                "{{app_url}}"
+              ],
+              "path": [
+                "webhooks",
+                "pixelforge"
+              ]
+            },
+            "description": "The terminal event lands first."
+          }
+        },
+        {
+          "name": "Processing (arrives late - must be ignored)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Signs the request body exactly as Pixelforge does:",
+                  "//   Pixelforge-Signature: t=<unix ts>,v1=HMAC_SHA256(\"<ts>.<raw body>\", secret)",
+                  "// Set {{webhook_secret}} to PIXELFORGE_WEBHOOK_SECRET from your .env.",
+                  "const secret = pm.environment.get(\"webhook_secret\") || pm.collectionVariables.get(\"webhook_secret\");",
+                  "",
+                  "if (!secret) {",
+                  "    console.warn(\"webhook_secret is not set - the app will reject this delivery with 401.\");",
+                  "}",
+                  "",
+                  "// Give each run fresh ids unless the request pins them (duplicate tests do).",
+                  "if (!pm.collectionVariables.get(\"pin_ids\")) {",
+                  "    pm.collectionVariables.set(\"event_id\", \"evt_\" + Date.now() + \"_\" + Math.floor(Math.random() * 1e6));",
+                  "}",
+                  "",
+                  "const timestamp = pm.collectionVariables.get(\"force_timestamp\") || Math.floor(Date.now() / 1000);",
+                  "",
+                  "// Resolve {{variables}} first: the signature must cover the exact bytes sent.",
+                  "const rawBody = pm.variables.replaceIn(pm.request.body.raw);",
+                  "",
+                  "const signature = CryptoJS.HmacSHA256(timestamp + \".\" + rawBody, secret).toString(CryptoJS.enc.Hex);",
+                  "",
+                  "pm.request.headers.upsert({ key: \"Pixelforge-Signature\", value: \"t=\" + timestamp + \",v1=\" + signature });",
+                  "pm.request.headers.upsert({ key: \"Pixelforge-Event-Id\", value: pm.collectionVariables.get(\"event_id\") });"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"accepted with 2xx\", () => pm.expect(pm.response.code).to.be.oneOf([200, 202, 204]));",
+                  "pm.test(\"answers within Pixelforge's 10s budget\", () => pm.expect(pm.response.responseTime).to.be.below(10000));",
+                  "",
+                  "pm.test(\"accepted so Pixelforge stops retrying\", () => pm.expect(pm.response.code).to.be.oneOf([200, 202, 204]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Pixelforge-Event-Type",
+                "value": "generation.processing"
+              },
+              {
+                "key": "Pixelforge-Delivery-Attempt",
+                "value": "1"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{event_id}}\",\n  \"object\": \"event\",\n  \"type\": \"generation.processing\",\n  \"created_at\": \"2026-11-16T19:38:17Z\",\n  \"data\": {\n    \"object\": {\n      \"id\": \"{{generation_id}}\",\n      \"object\": \"generation\",\n      \"status\": \"processing\",\n      \"prompt\": \"A lighthouse at dusk, long exposure\",\n      \"size\": \"1024x1024\",\n      \"quality\": \"low\",\n      \"reference_images\": [],\n      \"metadata\": {},\n      \"image_url\": null,\n      \"image_url_expires_at\": null,\n      \"usage\": null,\n      \"rates\": {\n        \"input_text_tokens\": \"5.00\",\n        \"input_image_tokens\": \"10.00\",\n        \"output_tokens\": \"40.00\",\n        \"reasoning_tokens\": \"12.50\"\n      },\n      \"error\": null,\n      \"created_at\": \"2026-11-16T19:38:08Z\",\n      \"started_at\": \"2026-11-16T19:38:10Z\",\n      \"completed_at\": null\n    }\n  }\n}"
+            },
+            "url": {
+              "raw": "{{app_url}}/webhooks/pixelforge",
+              "host": [
+                "{{app_url}}"
+              ],
+              "path": [
+                "webhooks",
+                "pixelforge"
+              ]
+            },
+            "description": "A stale event. The generation must stay succeeded with its cost intact."
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Failure",
+      "description": "A failed generation must cost the user nothing.",
+      "item": [
+        {
+          "name": "generation.failed",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Signs the request body exactly as Pixelforge does:",
+                  "//   Pixelforge-Signature: t=<unix ts>,v1=HMAC_SHA256(\"<ts>.<raw body>\", secret)",
+                  "// Set {{webhook_secret}} to PIXELFORGE_WEBHOOK_SECRET from your .env.",
+                  "const secret = pm.environment.get(\"webhook_secret\") || pm.collectionVariables.get(\"webhook_secret\");",
+                  "",
+                  "if (!secret) {",
+                  "    console.warn(\"webhook_secret is not set - the app will reject this delivery with 401.\");",
+                  "}",
+                  "",
+                  "// Give each run fresh ids unless the request pins them (duplicate tests do).",
+                  "if (!pm.collectionVariables.get(\"pin_ids\")) {",
+                  "    pm.collectionVariables.set(\"event_id\", \"evt_\" + Date.now() + \"_\" + Math.floor(Math.random() * 1e6));",
+                  "}",
+                  "",
+                  "const timestamp = pm.collectionVariables.get(\"force_timestamp\") || Math.floor(Date.now() / 1000);",
+                  "",
+                  "// Resolve {{variables}} first: the signature must cover the exact bytes sent.",
+                  "const rawBody = pm.variables.replaceIn(pm.request.body.raw);",
+                  "",
+                  "const signature = CryptoJS.HmacSHA256(timestamp + \".\" + rawBody, secret).toString(CryptoJS.enc.Hex);",
+                  "",
+                  "pm.request.headers.upsert({ key: \"Pixelforge-Signature\", value: \"t=\" + timestamp + \",v1=\" + signature });",
+                  "pm.request.headers.upsert({ key: \"Pixelforge-Event-Id\", value: pm.collectionVariables.get(\"event_id\") });"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"accepted with 2xx\", () => pm.expect(pm.response.code).to.be.oneOf([200, 202, 204]));",
+                  "pm.test(\"answers within Pixelforge's 10s budget\", () => pm.expect(pm.response.responseTime).to.be.below(10000));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Pixelforge-Event-Type",
+                "value": "generation.failed"
+              },
+              {
+                "key": "Pixelforge-Delivery-Attempt",
+                "value": "1"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{event_id}}\",\n  \"object\": \"event\",\n  \"type\": \"generation.failed\",\n  \"created_at\": \"2026-11-16T19:38:17Z\",\n  \"data\": {\n    \"object\": {\n      \"id\": \"{{generation_id}}\",\n      \"object\": \"generation\",\n      \"status\": \"failed\",\n      \"prompt\": \"A lighthouse at dusk, long exposure\",\n      \"size\": \"1024x1024\",\n      \"quality\": \"low\",\n      \"reference_images\": [],\n      \"metadata\": {},\n      \"image_url\": null,\n      \"image_url_expires_at\": null,\n      \"usage\": null,\n      \"rates\": {\n        \"input_text_tokens\": \"5.00\",\n        \"input_image_tokens\": \"10.00\",\n        \"output_tokens\": \"40.00\",\n        \"reasoning_tokens\": \"12.50\"\n      },\n      \"error\": {\n        \"code\": \"generation_failed\",\n        \"message\": \"The model could not generate an image.\"\n      },\n      \"created_at\": \"2026-11-16T19:38:08Z\",\n      \"started_at\": \"2026-11-16T19:38:10Z\",\n      \"completed_at\": \"2026-11-16T19:38:17Z\"\n    }\n  }\n}"
+            },
+            "url": {
+              "raw": "{{app_url}}/webhooks/pixelforge",
+              "host": [
+                "{{app_url}}"
+              ],
+              "path": [
+                "webhooks",
+                "pixelforge"
+              ]
+            },
+            "description": "Verify: status failed, actual cost 0, no charge recorded."
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Signature rejection",
+      "description": "Everything here must be REJECTED. If any returns 2xx, the endpoint is forgeable.",
+      "item": [
+        {
+          "name": "Unsigned request",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"rejected\", () => pm.expect(pm.response.code).to.be.oneOf([400, 401, 403]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{event_id}}\",\n  \"object\": \"event\",\n  \"type\": \"generation.succeeded\",\n  \"created_at\": \"2026-11-16T19:38:17Z\",\n  \"data\": {\n    \"object\": {\n      \"id\": \"{{generation_id}}\",\n      \"object\": \"generation\",\n      \"status\": \"succeeded\",\n      \"prompt\": \"A lighthouse at dusk, long exposure\",\n      \"size\": \"1024x1024\",\n      \"quality\": \"low\",\n      \"reference_images\": [],\n      \"metadata\": {},\n      \"image_url\": \"https://pixelforge.promptedit.dev/images/{{generation_id}}.png?expires=1794944297&signature=deadbeef\",\n      \"image_url_expires_at\": \"2026-11-17T19:38:17Z\",\n      \"usage\": {\n        \"input_text_tokens\": 12,\n        \"input_image_tokens\": 0,\n        \"output_tokens\": 280,\n        \"reasoning_tokens\": 122,\n        \"total_tokens\": 414\n      },\n      \"rates\": {\n        \"input_text_tokens\": \"5.00\",\n        \"input_image_tokens\": \"10.00\",\n        \"output_tokens\": \"40.00\",\n        \"reasoning_tokens\": \"12.50\"\n      },\n      \"error\": null,\n      \"created_at\": \"2026-11-16T19:38:08Z\",\n      \"started_at\": \"2026-11-16T19:38:10Z\",\n      \"completed_at\": \"2026-11-16T19:38:17Z\"\n    }\n  }\n}"
+            },
+            "url": {
+              "raw": "{{app_url}}/webhooks/pixelforge",
+              "host": [
+                "{{app_url}}"
+              ],
+              "path": [
+                "webhooks",
+                "pixelforge"
+              ]
+            },
+            "description": "No Pixelforge-Signature header at all."
+          }
+        },
+        {
+          "name": "Tampered body (signature covers the original)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Sign one payload, then send a different one.",
+                  "const secret = pm.environment.get(\"webhook_secret\") || pm.collectionVariables.get(\"webhook_secret\");",
+                  "const timestamp = Math.floor(Date.now() / 1000);",
+                  "const signed = JSON.stringify({ id: \"evt_original\", type: \"generation.succeeded\" });",
+                  "const signature = CryptoJS.HmacSHA256(timestamp + \".\" + signed, secret).toString(CryptoJS.enc.Hex);",
+                  "pm.request.headers.upsert({ key: \"Pixelforge-Signature\", value: \"t=\" + timestamp + \",v1=\" + signature });"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"rejected\", () => pm.expect(pm.response.code).to.be.oneOf([400, 401, 403]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{event_id}}\",\n  \"object\": \"event\",\n  \"type\": \"generation.succeeded\",\n  \"created_at\": \"2026-11-16T19:38:17Z\",\n  \"data\": {\n    \"object\": {\n      \"id\": \"{{generation_id}}\",\n      \"object\": \"generation\",\n      \"status\": \"succeeded\",\n      \"prompt\": \"A lighthouse at dusk, long exposure\",\n      \"size\": \"1024x1024\",\n      \"quality\": \"low\",\n      \"reference_images\": [],\n      \"metadata\": {},\n      \"image_url\": \"https://pixelforge.promptedit.dev/images/{{generation_id}}.png?expires=1794944297&signature=deadbeef\",\n      \"image_url_expires_at\": \"2026-11-17T19:38:17Z\",\n      \"usage\": {\n        \"input_text_tokens\": 12,\n        \"input_image_tokens\": 0,\n        \"output_tokens\": 280,\n        \"reasoning_tokens\": 122,\n        \"total_tokens\": 414\n      },\n      \"rates\": {\n        \"input_text_tokens\": \"5.00\",\n        \"input_image_tokens\": \"10.00\",\n        \"output_tokens\": \"40.00\",\n        \"reasoning_tokens\": \"12.50\"\n      },\n      \"error\": null,\n      \"created_at\": \"2026-11-16T19:38:08Z\",\n      \"started_at\": \"2026-11-16T19:38:10Z\",\n      \"completed_at\": \"2026-11-16T19:38:17Z\"\n    }\n  }\n}"
+            },
+            "url": {
+              "raw": "{{app_url}}/webhooks/pixelforge",
+              "host": [
+                "{{app_url}}"
+              ],
+              "path": [
+                "webhooks",
+                "pixelforge"
+              ]
+            },
+            "description": "A valid signature for a DIFFERENT body. Catches verifying a re-encoded payload instead of the raw bytes."
+          }
+        },
+        {
+          "name": "Stale timestamp (replay attack)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"force_timestamp\", Math.floor(Date.now() / 1000) - 3600);",
+                  "// Signs the request body exactly as Pixelforge does:",
+                  "//   Pixelforge-Signature: t=<unix ts>,v1=HMAC_SHA256(\"<ts>.<raw body>\", secret)",
+                  "// Set {{webhook_secret}} to PIXELFORGE_WEBHOOK_SECRET from your .env.",
+                  "const secret = pm.environment.get(\"webhook_secret\") || pm.collectionVariables.get(\"webhook_secret\");",
+                  "",
+                  "if (!secret) {",
+                  "    console.warn(\"webhook_secret is not set - the app will reject this delivery with 401.\");",
+                  "}",
+                  "",
+                  "// Give each run fresh ids unless the request pins them (duplicate tests do).",
+                  "if (!pm.collectionVariables.get(\"pin_ids\")) {",
+                  "    pm.collectionVariables.set(\"event_id\", \"evt_\" + Date.now() + \"_\" + Math.floor(Math.random() * 1e6));",
+                  "}",
+                  "",
+                  "const timestamp = pm.collectionVariables.get(\"force_timestamp\") || Math.floor(Date.now() / 1000);",
+                  "",
+                  "// Resolve {{variables}} first: the signature must cover the exact bytes sent.",
+                  "const rawBody = pm.variables.replaceIn(pm.request.body.raw);",
+                  "",
+                  "const signature = CryptoJS.HmacSHA256(timestamp + \".\" + rawBody, secret).toString(CryptoJS.enc.Hex);",
+                  "",
+                  "pm.request.headers.upsert({ key: \"Pixelforge-Signature\", value: \"t=\" + timestamp + \",v1=\" + signature });",
+                  "pm.request.headers.upsert({ key: \"Pixelforge-Event-Id\", value: pm.collectionVariables.get(\"event_id\") });"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"rejected\", () => pm.expect(pm.response.code).to.be.oneOf([400, 401, 403]));",
+                  "pm.collectionVariables.unset(\"force_timestamp\");"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Pixelforge-Event-Type",
+                "value": "generation.succeeded"
+              },
+              {
+                "key": "Pixelforge-Delivery-Attempt",
+                "value": "1"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{event_id}}\",\n  \"object\": \"event\",\n  \"type\": \"generation.succeeded\",\n  \"created_at\": \"2026-11-16T19:38:17Z\",\n  \"data\": {\n    \"object\": {\n      \"id\": \"{{generation_id}}\",\n      \"object\": \"generation\",\n      \"status\": \"succeeded\",\n      \"prompt\": \"A lighthouse at dusk, long exposure\",\n      \"size\": \"1024x1024\",\n      \"quality\": \"low\",\n      \"reference_images\": [],\n      \"metadata\": {},\n      \"image_url\": \"https://pixelforge.promptedit.dev/images/{{generation_id}}.png?expires=1794944297&signature=deadbeef\",\n      \"image_url_expires_at\": \"2026-11-17T19:38:17Z\",\n      \"usage\": {\n        \"input_text_tokens\": 12,\n        \"input_image_tokens\": 0,\n        \"output_tokens\": 280,\n        \"reasoning_tokens\": 122,\n        \"total_tokens\": 414\n      },\n      \"rates\": {\n        \"input_text_tokens\": \"5.00\",\n        \"input_image_tokens\": \"10.00\",\n        \"output_tokens\": \"40.00\",\n        \"reasoning_tokens\": \"12.50\"\n      },\n      \"error\": null,\n      \"created_at\": \"2026-11-16T19:38:08Z\",\n      \"started_at\": \"2026-11-16T19:38:10Z\",\n      \"completed_at\": \"2026-11-16T19:38:17Z\"\n    }\n  }\n}"
+            },
+            "url": {
+              "raw": "{{app_url}}/webhooks/pixelforge",
+              "host": [
+                "{{app_url}}"
+              ],
+              "path": [
+                "webhooks",
+                "pixelforge"
+              ]
+            },
+            "description": "Correctly signed, but an hour old. Pixelforge's tolerance is 300s."
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Fallback: no webhook at all",
+      "description": "The case this collection exists for. If a webhook is never delivered, the scheduled reconciler must still settle the generation by polling.\n\nHow to test:\n1. Run 0 > Create a generation (it uses [slow]).\n2. Do NOT fire any webhook from folder 1.\n3. Wait past your reconcile interval, or run the command below in a terminal.\n4. The generation must reach succeeded with the correct actual cost, from polling alone.\n\n    ./vendor/bin/sail artisan generations:reconcile\n\nThen confirm with 'Get the generation (real API)' that your stored usage and cost match Pixelforge's.",
+      "item": [
+        {
+          "name": "Get the generation (real API) - compare after reconciling",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{pixelforge_api_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{pixelforge_base_url}}/v1/generations/{{generation_id}}",
+              "host": [
+                "{{pixelforge_base_url}}"
+              ],
+              "path": [
+                "v1",
+                "generations",
+                "{{generation_id}}"
+              ]
+            },
+            "description": "Compare status, usage and the derived cost with what the reconciler stored."
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -10,40 +10,47 @@ return [
     | Every amount is a decimal string in USD and is only ever handled by
     | App\Pricing\Money (bcmath). Never put a float in here.
     |
-    | Users pay Pixelforge's cost plus the markup, rounded up to 8 decimals.
+    | Users pay Pixelforge's cost plus the markup, rounded up.
     |
     */
 
     'markup' => '1.25',
 
     /*
-    | USD per token, by token type.
-    |
-    | [confirm] PLACEHOLDER VALUES. Replace with Pixelforge's published rate
-    | table before anything is charged for real. The admin report compares our
-    | numbers with GET /v1/usage, so these must match the docs exactly.
+    | USD per 1,000,000 tokens, by token type, mirroring GET /v1/pricing.
+    | Verified against the live API on 2026-11-16.
     */
     'rates' => [
-        'prompt' => '0.000005',
-        'reference_image' => '0.00001',
-        'output' => '0.00004',
+        'input_text_tokens' => '5.00',
+        'input_image_tokens' => '10.00',
+        'output_tokens' => '40.00',
+        'reasoning_tokens' => '12.50',
     ],
 
+    'rate_unit_tokens' => 1_000_000,
+
     /*
-    | Token counts used for the up-front estimate. Output tokens are only known
-    | once a generation finishes, so the estimate uses typical values; the
-    | actual cost is always computed from the usage Pixelforge reports.
+    | Token counts used for the up-front estimate.
     |
-    | [confirm] PLACEHOLDER VALUES, keyed by App\Enums\ImageSize and
-    | App\Enums\ImageQuality.
+    | Input text and output tokens are predictable at submission; reasoning
+    | tokens are only known once a generation finishes, so the estimate uses
+    | the midpoint of the documented range and the actual cost is always
+    | recomputed from the usage Pixelforge reports.
     */
     'estimate_tokens' => [
-        'prompt' => 32,
-        'reference_image' => 765,
+        'characters_per_text_token' => 4,
+        'per_reference_image' => 765,
+
         'output' => [
-            '1024x1024' => ['standard' => 1056, 'high' => 4160],
-            '1024x1536' => ['standard' => 1584, 'high' => 6240],
-            '1536x1024' => ['standard' => 1584, 'high' => 6240],
+            'low' => ['1024x1024' => 280, '1536x1024' => 420, '1024x1536' => 420],
+            'medium' => ['1024x1024' => 1100, '1536x1024' => 1650, '1024x1536' => 1650],
+            'high' => ['1024x1024' => 4300, '1536x1024' => 6450, '1024x1536' => 6450],
+        ],
+
+        'reasoning' => [
+            'low' => ['min' => 0, 'max' => 500],
+            'medium' => ['min' => 200, 'max' => 2000],
+            'high' => ['min' => 1000, 'max' => 8000],
         ],
     ],
 

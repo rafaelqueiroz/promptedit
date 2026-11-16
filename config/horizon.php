@@ -69,7 +69,9 @@ return [
 
     'prefix' => env(
         'HORIZON_PREFIX',
-        Str::slug(env('APP_NAME', 'laravel'), '_').'_horizon:'
+        // config() rather than env(): the app name is already cast to a string
+        // there, while a bare env() can hand Str::slug() a bool.
+        Str::slug((string) config('app.name', 'laravel'), '_').'_horizon:'
     ),
 
     /*

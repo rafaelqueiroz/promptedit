@@ -26,7 +26,7 @@ One code path (`ApplyProviderResult`) applies a provider state to a generation, 
 - Pixelforge account; **two API keys**: `local` (webhook URL = tunnel) and `cloud` (webhook URL = Laravel Cloud app). One key per environment keeps `GET /v1/usage` comparable per deployment.
 - `config/pixelforge.php` → `base_url`, `api_key`, `webhook_secret`, `max_reference_images`. Env: `PIXELFORGE_API_KEY`, `PIXELFORGE_WEBHOOK_SECRET`, `PIXELFORGE_BASE_URL`. **(done)**
 - `config/pricing.php` → token rates per size/quality, reference-image rate, prompt rate, `markup => '1.25'`. **All as strings**, never floats. **[confirm]** the published rate table and its unit (per token / per 1M tokens).
-- Laravel Cloud: add env vars, enable a **queue worker** and the **scheduler** (both are needed: submission runs in the queue, reconciliation on the schedule).
+- Laravel Cloud: add env vars, run **`php artisan horizon`** as a single background process (it manages the workers itself) and enable the **scheduler** — both are needed: submission runs in the queue, reconciliation on the schedule. **(Horizon installed 2026-11-16: Redis queues `generations` + `default`, dashboard gated on `is_admin`.)**
 - Local: `sail up`, tunnel on port 80 (Expose/ngrok/cloudflared), paste the tunnel URL into the local key's webhook URL.
 
 ## Phase 1 — Money and pricing (~30 min, do this first)
@@ -63,7 +63,7 @@ Rule: no floats anywhere money is computed or stored.
 - `user_id`, `generation_id` (nullable), `type` enum `{ purchase, charge, hold, release }`, `amount` numeric signed, `idempotency_key` **unique** (e.g. `generation:{id}:charge`), `description`, timestamps
 - The unique key is the second guarantee that a generation is never charged twice.
 
-`users` → `is_admin` boolean (for the admin report).
+`users` → `is_admin` boolean (for the admin report and Horizon). **(done)**
 
 ## Phase 3 — Pixelforge client (~30 min)
 
@@ -82,7 +82,7 @@ Submit
 
 1. `StoreGenerationRequest` validates prompt, size, quality (from the config table), `reference_image_urls[]` as URLs (max N **[confirm]**).
 2. Controller computes the estimate server-side, creates `Generation{Queued}` with the estimate, dispatches `SubmitGeneration` job, redirects to history with a toast.
-3. `SubmitGeneration` job: `tries` 5, `backoff` `[10, 30, 60, 120]`, honours `Retry-After` on `RateLimited`/`Overloaded`/`ConcurrencyLimited` via `release($seconds)`. On `InvalidRequest` → mark `Failed` immediately (no retry). On final failure → `Failed` with a readable error. On success → store `provider_generation_id`, `submitted_at`. Without an idempotency key, only retry errors that guarantee the request was not accepted (connection refused, 429, 503); a timeout after send is reported as failed-to-submit rather than retried blindly. Not trying to be clever here is the safe default; see open questions.
+3. `SubmitGeneration` job (queue `generations`): `tries` 5, `backoff` `[10, 30, 60, 120]` — set on the job, since Horizon's supervisor `tries` is 1 so it never imposes a second retry policy; honours `Retry-After` on `RateLimited`/`Overloaded`/`ConcurrencyLimited` via `release($seconds)`. On `InvalidRequest` → mark `Failed` immediately (no retry). On final failure → `Failed` with a readable error. On success → store `provider_generation_id`, `submitted_at`. Without an idempotency key, only retry errors that guarantee the request was not accepted (connection refused, 429, 503); a timeout after send is reported as failed-to-submit rather than retried blindly. Not trying to be clever here is the safe default; see open questions.
 
 State machine (`GenerationStatus::canTransitionTo`)
 

@@ -4,7 +4,7 @@
 
 Take-home assessment for the Senior Product Engineer role at PromptEdit. See [docs/assessment.md](docs/assessment.md) for the brief and [docs/plan.md](docs/plan.md) for the implementation plan.
 
-Stack: Laravel 13, Vue 3, Inertia, Tailwind, Postgres. Deployed on Laravel Cloud.
+Stack: Laravel 13, Vue 3, Inertia, Tailwind, Postgres, Redis + Horizon. Deployed on Laravel Cloud.
 
 ## Local development (Laravel Sail)
 
@@ -30,13 +30,33 @@ Day-to-day:
 ```bash
 ./vendor/bin/sail up -d          # start app + pgsql + redis
 ./vendor/bin/sail npm run dev    # Vite dev server (http://localhost)
-./vendor/bin/sail artisan queue:work   # generations are processed in the queue
+./vendor/bin/sail artisan horizon      # queue workers + dashboard at /horizon
 ./vendor/bin/sail artisan test
 ./vendor/bin/sail composer test  # pint + phpstan + rector + phpunit
 ./vendor/bin/sail down
 ```
 
 Tip: `alias sail='./vendor/bin/sail'`.
+
+### Queues (Horizon)
+
+Generations are submitted to Pixelforge from a queued job, so **a worker must be
+running** or nothing leaves the `queued` state. Horizon runs the workers and
+serves a dashboard at [/horizon](http://localhost/horizon):
+
+```bash
+./vendor/bin/sail artisan horizon            # start workers + dashboard
+./vendor/bin/sail artisan horizon:terminate  # stop gracefully (after a deploy)
+```
+
+Jobs use two Redis queues: `generations` (user-facing submissions, drained
+first) and `default`. The dashboard is open in `local`; everywhere else it is
+restricted to users with `is_admin`, via the `viewHorizon` gate in
+[HorizonServiceProvider](app/Providers/HorizonServiceProvider.php).
+
+On Laravel Cloud, add `php artisan horizon` as a background process (a single
+process — Horizon manages its own workers) rather than configuring queue
+workers separately.
 
 Services and host ports: app `80`, Vite `5173`, Postgres `5432`, Redis `6379`. Override with `APP_PORT`, `VITE_PORT`, `FORWARD_DB_PORT`, `FORWARD_REDIS_PORT` in `.env`.
 

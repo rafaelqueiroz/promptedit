@@ -26,8 +26,8 @@ class HomeController extends Controller
 
         return Inertia::render('Welcome', [
             'options' => [
-                'sizes' => array_map(fn (ImageSize $size) => $size->toOption(), ImageSize::cases()),
-                'qualities' => array_map(fn (ImageQuality $quality) => $quality->toOption(), ImageQuality::cases()),
+                'sizes' => array_map(fn (ImageSize $size): array => $size->toOption(), ImageSize::cases()),
+                'qualities' => array_map(fn (ImageQuality $quality): array => $quality->toOption(), ImageQuality::cases()),
             ],
             'estimates' => (new PriceTable($pricing, $maxReferenceImages))->build(),
             'maxReferenceImages' => $maxReferenceImages,

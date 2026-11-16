@@ -17,7 +17,7 @@ class HomeTest extends TestCase
     {
         $this->get(route('home'))
             ->assertOk()
-            ->assertInertia(fn (Assert $page) => $page
+            ->assertInertia(fn (Assert $page): Assert => $page
                 ->component('Welcome')
                 ->has('options.sizes', 3)
                 ->has('options.qualities', 2)
@@ -35,6 +35,6 @@ class HomeTest extends TestCase
         $this->actingAs(User::factory()->create())
             ->get(route('home'))
             ->assertOk()
-            ->assertInertia(fn (Assert $page) => $page->component('Welcome'));
+            ->assertInertia(fn (Assert $page): Assert => $page->component('Welcome'));
     }
 }

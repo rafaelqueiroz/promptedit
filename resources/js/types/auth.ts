@@ -27,3 +27,5 @@ export type TwoFactorConfigContent = {
     description: string;
     buttonText: string;
 };
+
+export type AuthMode = 'login' | 'register';

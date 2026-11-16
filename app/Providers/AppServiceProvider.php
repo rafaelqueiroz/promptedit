@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Pricing\PricingCalculator;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
@@ -15,7 +16,12 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->app->singleton(PricingCalculator::class, function (): PricingCalculator {
+            /** @var array{markup: string, rates: array<string, string>, estimate_tokens: array{prompt: int, reference_image: int, output: array<string, array<string, int>>}} $config */
+            $config = config('pricing');
+
+            return new PricingCalculator($config);
+        });
     }
 
     /**

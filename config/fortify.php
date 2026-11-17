@@ -73,7 +73,8 @@ return [
     |
     */
 
-    'home' => '/dashboard',
+    // The landing page is the app: compose, generate and see results there.
+    'home' => '/',
 
     /*
     |--------------------------------------------------------------------------

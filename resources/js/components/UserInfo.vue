@@ -7,10 +7,13 @@ import type { User } from '@/types';
 type Props = {
     user: User;
     showEmail?: boolean;
+    /** Hidden in tight spots such as the landing page header. */
+    showName?: boolean;
 };
 
 const props = withDefaults(defineProps<Props>(), {
     showEmail: false,
+    showName: true,
 });
 
 const { getInitials } = useInitials();
@@ -29,7 +32,7 @@ const showAvatar = computed(
         </AvatarFallback>
     </Avatar>
 
-    <div class="grid flex-1 text-left text-sm leading-tight">
+    <div v-if="showName" class="grid flex-1 text-left text-sm leading-tight">
         <span class="truncate font-medium">{{ user.name }}</span>
         <span v-if="showEmail" class="truncate text-xs text-muted-foreground">{{
             user.email

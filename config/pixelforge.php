@@ -22,4 +22,11 @@ return [
     // Pixelforge rejects webhook timestamps older than this.
     'webhook_tolerance_seconds' => 300,
 
+    /*
+     * How long a generation must have been in flight before the reconciler
+     * polls for it. Short, because without a webhook endpoint polling is the
+     * only thing that settles it.
+     */
+    'reconcile_after_seconds' => (int) env('PIXELFORGE_RECONCILE_AFTER', 15),
+
 ];

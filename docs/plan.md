@@ -71,12 +71,14 @@ Rule: no floats anywhere money is computed or stored.
 
 `webhook_events`
 
-- `provider_event_id` **unique**, `generation_id` (nullable fk), `type`, `payload` json, `received_at`, `processed_at` (nullable)
-- Every delivery is inserted (insert-or-ignore on the unique key). "An event delivered twice must never be recorded twice" is enforced by the database, not by code paths. **[confirm]** the event id field name and whether redeliveries reuse the same id (they should; if Pixelforge uses a per-delivery id, dedupe on `(generation_id, type)` instead).
+- `provider`, `event_id`, **compound unique `(provider, event_id)`**, `type`, `subject_type`/`subject_id`, `payload` json, `processed_at` (nullable). **(done)**
+- Every delivery is inserted (insert-or-ignore on the unique key). "An event delivered twice must never be recorded twice" is enforced by the database, not by code paths.
+- Uniqueness is scoped to the provider deliberately: event ids are only unique *within* an integration, so a global unique index would let a second provider's event (a payment webhook, say) be silently swallowed as a duplicate. `subject_*` keeps the table from hard-coding generations.
 
 `credit_transactions` (ledger — also what the Balances stretch goal needs)
 
-- `user_id`, `generation_id` (nullable), `type` enum `{ purchase, charge, hold, release }`, `amount` numeric signed, `idempotency_key` **unique** (e.g. `generation:{id}:charge`), `description`, timestamps
+- `user_id`, `source_type`/`source_id` (nullable), `type`, `amount` numeric signed, `idempotency_key` **unique** (e.g. `media:{id}:charge`), `description`, timestamps. **(done)**
+- The source is deliberately not a foreign key to `media`: a purchase or refund records its own source without the ledger needing to know that generations exist.
 - The unique key is the second guarantee that a generation is never charged twice.
 
 `users` → `is_admin` boolean (for the admin report and Horizon). **(done)**

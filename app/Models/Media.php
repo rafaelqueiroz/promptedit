@@ -152,8 +152,8 @@ class Media extends Model
      */
     public function imageUrl(): ?string
     {
-        if ($this->path !== null && $this->disk !== null) {
-            return Storage::disk($this->disk)->url($this->path);
+        if ($this->path !== null) {
+            return Storage::url($this->path);
         }
 
         return $this->source_url;

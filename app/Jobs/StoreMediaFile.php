@@ -55,10 +55,9 @@ class StoreMediaFile implements ShouldQueue
             $response->throw();
         }
 
-        $disk = (string) config('media.disk');
         $path = 'media/'.$media->getKey().'.png';
 
-        Storage::disk($disk)->put($path, $response->body());
+        Storage::put($path, $response->body());
 
         $media->forceFill(['disk' => $disk, 'path' => $path])->save();
     }

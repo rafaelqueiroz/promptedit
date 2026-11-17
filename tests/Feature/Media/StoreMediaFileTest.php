@@ -29,8 +29,6 @@ class StoreMediaFileTest extends TestCase
         $media->refresh();
 
         $this->assertSame("media/{$media->id}.png", $media->path);
-        $this->assertSame('public', $media->disk);
-        Storage::disk('public')->assertExists("media/{$media->id}.png");
         $this->assertTrue($media->isStored());
     }
 

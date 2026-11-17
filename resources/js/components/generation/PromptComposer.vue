@@ -138,9 +138,9 @@ function submit() {
         </div>
 
         <div
-            class="flex flex-col gap-3 border-t bg-muted/40 px-3 py-3 sm:flex-row sm:items-center"
+            class="flex flex-col gap-3 border-t bg-muted/40 px-3 py-3 md:flex-row md:items-center"
         >
-            <div class="flex flex-wrap items-center gap-2">
+            <div class="flex min-w-0 flex-wrap items-center gap-2 md:flex-1">
                 <Select v-model="draft.size">
                     <SelectTrigger
                         size="sm"
@@ -198,9 +198,9 @@ function submit() {
             </div>
 
             <div
-                class="flex items-center justify-between gap-3 sm:ml-auto sm:justify-end"
+                class="flex items-center justify-between gap-3 md:ml-auto md:justify-end"
             >
-                <div class="leading-tight sm:text-right">
+                <div class="leading-tight md:text-right">
                     <div
                         class="text-sm font-semibold tabular-nums"
                         :title="estimate ? `$${estimate} estimated` : undefined"
@@ -208,7 +208,9 @@ function submit() {
                     >
                         ≈ {{ formatMoney(estimate) }}
                     </div>
-                    <div class="text-[11px] text-muted-foreground">
+                    <div
+                        class="text-[11px] whitespace-nowrap text-muted-foreground"
+                    >
                         estimate · exact cost when it finishes
                     </div>
                 </div>
@@ -216,7 +218,7 @@ function submit() {
                 <Button
                     type="submit"
                     size="lg"
-                    class="bg-brand text-brand-foreground hover:bg-brand/90"
+                    class="shrink-0 bg-brand text-brand-foreground hover:bg-brand/90"
                     :disabled="!canSubmit"
                     data-test="generate-button"
                 >

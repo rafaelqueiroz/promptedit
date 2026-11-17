@@ -21,6 +21,17 @@ const priceLabel = computed(() =>
         ? `≈ ${formatMoney(props.item.estimatedPrice)}`
         : formatMoney(props.item.price),
 );
+
+/*
+ * Once settled, show what was estimated beside what was charged — but only
+ * when the two differ, since repeating the same figure twice is just noise.
+ */
+const showEstimate = computed(
+    () =>
+        props.item.price !== null &&
+        formatMoney(props.item.estimatedPrice) !==
+            formatMoney(props.item.price),
+);
 </script>
 
 <template>
@@ -73,15 +84,24 @@ const priceLabel = computed(() =>
                     :status="item.status"
                     :label="item.statusLabel"
                 />
-                <span
-                    class="text-sm font-semibold tabular-nums"
-                    :title="
-                        item.price === null
-                            ? `Estimated $${item.estimatedPrice}`
-                            : `Charged $${item.price}`
-                    "
-                >
-                    {{ priceLabel }}
+                <span class="flex items-baseline gap-1.5 whitespace-nowrap">
+                    <span
+                        v-if="showEstimate"
+                        class="text-xs text-muted-foreground tabular-nums line-through"
+                        :title="`Estimated $${item.estimatedPrice}`"
+                    >
+                        {{ formatMoney(item.estimatedPrice) }}
+                    </span>
+                    <span
+                        class="text-sm font-semibold tabular-nums"
+                        :title="
+                            item.price === null
+                                ? `Estimated $${item.estimatedPrice}`
+                                : `Charged $${item.price}`
+                        "
+                    >
+                        {{ priceLabel }}
+                    </span>
                 </span>
             </div>
 

@@ -8,7 +8,6 @@ use App\Services\Media\MediaHistory;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
-use Laravel\Fortify\Features;
 
 class HomeController extends Controller
 {
@@ -26,7 +25,6 @@ class HomeController extends Controller
         return Inertia::render('Welcome', [
             ...$composer->toArray(),
             'samplePrompts' => self::SAMPLE_PROMPTS,
-            'canResetPassword' => Features::enabled(Features::resetPasswords()),
             // Signed-in visitors generate and see results without leaving the
             // page, so the landing page is the product rather than an advert
             // for it.

@@ -52,7 +52,6 @@ const props = defineProps<{
     maxReferenceImages: number;
     defaults: { size: string; quality: string };
     samplePrompts: string[];
-    canResetPassword: boolean;
     recentMedia: MediaItem[];
 }>();
 
@@ -130,6 +129,8 @@ function useSample(prompt: string) {
     document.getElementById('prompt')?.focus();
 }
 
+const results = useTemplateRef<HTMLElement>('results');
+
 const form = useForm({
     prompt: '',
     size: '',
@@ -168,6 +169,15 @@ function submit(current: GenerationDraft) {
         onSuccess: () => {
             draft.value.prompt = '';
             draft.value.referenceImageUrls = [];
+
+            // Carry the eye to the result that just appeared. nextTick so the
+            // new card is in the DOM before we measure where to scroll.
+            void nextTick(() => {
+                results.value?.scrollIntoView({
+                    behavior: 'smooth',
+                    block: 'start',
+                });
+            });
         },
     });
 }
@@ -390,7 +400,8 @@ watch(
 
             <section
                 v-if="user && recentMedia.length"
-                class="mx-auto max-w-5xl px-4 pb-16 sm:px-6"
+                ref="results"
+                class="mx-auto max-w-5xl scroll-mt-20 px-4 pb-16 sm:px-6"
             >
                 <div class="mb-4 flex items-center justify-between gap-4">
                     <h2 class="text-lg font-semibold tracking-tight">
@@ -580,7 +591,6 @@ watch(
         <AuthDialog
             v-model:open="auth.open"
             v-model:mode="auth.mode"
-            :can-reset-password="canResetPassword"
             :reason="auth.reason"
         />
     </div>

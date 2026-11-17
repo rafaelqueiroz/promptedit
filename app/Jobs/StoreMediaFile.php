@@ -59,6 +59,6 @@ class StoreMediaFile implements ShouldQueue
 
         Storage::put($path, $response->body());
 
-        $media->forceFill(['disk' => $disk, 'path' => $path])->save();
+        $media->forceFill(['path' => $path])->save();
     }
 }

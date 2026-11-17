@@ -34,6 +34,7 @@ class RegistrationTest extends TestCase
         ]);
 
         $this->assertAuthenticated();
-        $response->assertRedirect(route('dashboard', absolute: false));
+        // The landing page is the app, so that is where sign-in lands.
+        $response->assertRedirect(route('home', absolute: false));
     }
 }

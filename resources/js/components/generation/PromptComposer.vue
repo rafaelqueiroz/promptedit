@@ -138,65 +138,69 @@ function submit() {
         </div>
 
         <div
-            class="flex flex-wrap items-center gap-2 border-t bg-muted/40 px-3 py-3"
+            class="flex flex-col gap-3 border-t bg-muted/40 px-3 py-3 md:flex-row md:items-center"
         >
-            <Select v-model="draft.size">
-                <SelectTrigger
-                    size="sm"
-                    aria-label="Size"
-                    class="bg-background"
-                >
-                    <SelectValue>{{ selectedSize?.label }}</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                    <SelectItem
-                        v-for="size in options.sizes"
-                        :key="size.value"
-                        :value="size.value"
+            <div class="flex min-w-0 flex-wrap items-center gap-2 md:flex-1">
+                <Select v-model="draft.size">
+                    <SelectTrigger
+                        size="sm"
+                        aria-label="Size"
+                        class="bg-background"
                     >
-                        {{ size.label }}
-                        <span class="text-muted-foreground">
-                            {{ size.description }}
-                        </span>
-                    </SelectItem>
-                </SelectContent>
-            </Select>
+                        <SelectValue>{{ selectedSize?.label }}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem
+                            v-for="size in options.sizes"
+                            :key="size.value"
+                            :value="size.value"
+                        >
+                            {{ size.label }}
+                            <span class="text-muted-foreground">
+                                {{ size.description }}
+                            </span>
+                        </SelectItem>
+                    </SelectContent>
+                </Select>
 
-            <Select v-model="draft.quality">
-                <SelectTrigger
-                    size="sm"
-                    aria-label="Quality"
-                    class="bg-background"
-                >
-                    <SelectValue>{{ selectedQuality?.label }}</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                    <SelectItem
-                        v-for="quality in options.qualities"
-                        :key="quality.value"
-                        :value="quality.value"
+                <Select v-model="draft.quality">
+                    <SelectTrigger
+                        size="sm"
+                        aria-label="Quality"
+                        class="bg-background"
                     >
-                        {{ quality.label }}
-                        <span class="text-muted-foreground">
-                            {{ quality.description }}
-                        </span>
-                    </SelectItem>
-                </SelectContent>
-            </Select>
+                        <SelectValue>{{ selectedQuality?.label }}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem
+                            v-for="quality in options.qualities"
+                            :key="quality.value"
+                            :value="quality.value"
+                        >
+                            {{ quality.label }}
+                            <span class="text-muted-foreground">
+                                {{ quality.description }}
+                            </span>
+                        </SelectItem>
+                    </SelectContent>
+                </Select>
 
-            <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                :disabled="!canAddReferenceImage"
-                @click="addReferenceImage"
+                <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    :disabled="!canAddReferenceImage"
+                    @click="addReferenceImage"
+                >
+                    <ImagePlus />
+                    Reference image
+                </Button>
+            </div>
+
+            <div
+                class="flex items-center justify-between gap-3 md:ml-auto md:justify-end"
             >
-                <ImagePlus />
-                Reference image
-            </Button>
-
-            <div class="ml-auto flex items-center gap-3">
-                <div class="text-right leading-tight">
+                <div class="leading-tight md:text-right">
                     <div
                         class="text-sm font-semibold tabular-nums"
                         :title="estimate ? `$${estimate} estimated` : undefined"
@@ -204,7 +208,9 @@ function submit() {
                     >
                         ≈ {{ formatMoney(estimate) }}
                     </div>
-                    <div class="text-[11px] text-muted-foreground">
+                    <div
+                        class="text-[11px] whitespace-nowrap text-muted-foreground"
+                    >
                         estimate · exact cost when it finishes
                     </div>
                 </div>
@@ -212,7 +218,7 @@ function submit() {
                 <Button
                     type="submit"
                     size="lg"
-                    class="bg-brand text-brand-foreground hover:bg-brand/90"
+                    class="shrink-0 bg-brand text-brand-foreground hover:bg-brand/90"
                     :disabled="!canSubmit"
                     data-test="generate-button"
                 >

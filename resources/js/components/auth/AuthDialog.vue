@@ -2,7 +2,6 @@
 import { Form, usePage } from '@inertiajs/vue3';
 import InputError from '@/components/InputError.vue';
 import PasswordInput from '@/components/PasswordInput.vue';
-import TextLink from '@/components/TextLink.vue';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
@@ -16,12 +15,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
 import { store as login } from '@/routes/login';
-import { request as requestPasswordReset } from '@/routes/password';
 import { store as register } from '@/routes/register';
 import type { AuthMode } from '@/types';
 
 defineProps<{
-    canResetPassword: boolean;
     /** Shown instead of the default description, e.g. why signing in is needed right now. */
     reason?: string;
 }>();
@@ -58,6 +55,7 @@ const mode = defineModel<AuthMode>('mode', { default: 'login' });
                 v-bind="login.form()"
                 :reset-on-success="['password']"
                 v-slot="{ errors, processing }"
+                @success="open = false"
                 class="grid gap-5"
             >
                 <div class="grid gap-2">
@@ -74,16 +72,7 @@ const mode = defineModel<AuthMode>('mode', { default: 'login' });
                 </div>
 
                 <div class="grid gap-2">
-                    <div class="flex items-center justify-between">
-                        <Label for="auth-password">Password</Label>
-                        <TextLink
-                            v-if="canResetPassword"
-                            :href="requestPasswordReset()"
-                            class="text-sm"
-                        >
-                            Forgot your password?
-                        </TextLink>
-                    </div>
+                    <Label for="auth-password">Password</Label>
                     <PasswordInput
                         id="auth-password"
                         name="password"
@@ -129,6 +118,7 @@ const mode = defineModel<AuthMode>('mode', { default: 'login' });
                 v-bind="register.form()"
                 :reset-on-success="['password', 'password_confirmation']"
                 v-slot="{ errors, processing }"
+                @success="open = false"
                 class="grid gap-5"
             >
                 <div class="grid gap-2">

@@ -1,22 +1,49 @@
 <script setup lang="ts">
-import { Head, Link, router, usePage } from '@inertiajs/vue3';
-import { Activity, ArrowRight, Eye, Moon, Receipt, Sun } from '@lucide/vue';
+import { Head, Link, router, useForm, usePage } from '@inertiajs/vue3';
+import {
+    Activity,
+    ChevronDown,
+    ChevronLeft,
+    ChevronRight,
+    Eye,
+    Moon,
+    Receipt,
+    Sun,
+} from '@lucide/vue';
 import type { LucideIcon } from '@lucide/vue';
-import { computed, ref } from 'vue';
+import {
+    computed,
+    nextTick,
+    onMounted,
+    onUnmounted,
+    ref,
+    useTemplateRef,
+    watch,
+} from 'vue';
 import AppLogoIcon from '@/components/AppLogoIcon.vue';
 import AuthDialog from '@/components/auth/AuthDialog.vue';
+import MediaCard from '@/components/media/MediaCard.vue';
 import PromptComposer from '@/components/generation/PromptComposer.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import UserInfo from '@/components/UserInfo.vue';
+import UserMenuContent from '@/components/UserMenuContent.vue';
 import { useAppearance } from '@/composables/useAppearance';
-import { saveDraft } from '@/lib/draft';
+import { saveDraft, takeDraft } from '@/lib/draft';
 import { formatMoney } from '@/lib/money';
-import { dashboard, home } from '@/routes';
+import { home } from '@/routes';
+import * as media from '@/routes/media';
 import type {
     AuthMode,
     EstimateTable,
     GenerationDraft,
     GenerationOptions,
+    MediaItem,
 } from '@/types';
 
 const props = defineProps<{
@@ -25,7 +52,7 @@ const props = defineProps<{
     maxReferenceImages: number;
     defaults: { size: string; quality: string };
     samplePrompts: string[];
-    canResetPassword: boolean;
+    recentMedia: MediaItem[];
 }>();
 
 const page = usePage();
@@ -102,21 +129,140 @@ function useSample(prompt: string) {
     document.getElementById('prompt')?.focus();
 }
 
-function submit(current: GenerationDraft) {
-    // The draft survives the sign-in round trip so the user never retypes it.
-    saveDraft(current);
+const results = useTemplateRef<HTMLElement>('results');
 
-    if (user.value) {
-        router.visit(dashboard());
+const form = useForm({
+    prompt: '',
+    size: '',
+    quality: '',
+    reference_image_urls: [] as string[],
+});
+
+function submit(current: GenerationDraft) {
+    if (!user.value) {
+        // The draft survives the sign-in round trip so nothing is retyped.
+        saveDraft(current);
+
+        openAuth(
+            'login',
+            'Sign in to generate — your prompt will be waiting for you.',
+        );
 
         return;
     }
 
-    openAuth(
-        'login',
-        'Sign in to generate — your prompt will be waiting for you.',
+    form.prompt = current.prompt;
+    form.size = current.size;
+    form.quality = current.quality;
+    form.reference_image_urls = current.referenceImageUrls.filter(
+        (url) => url.trim() !== '',
     );
+
+    /*
+     * The controller redirects back, so this re-renders the landing page with
+     * a fresh recentMedia and the new generation already in the slider.
+     * preserveState keeps the composer's own draft from being reset.
+     */
+    form.post(media.store().url, {
+        preserveScroll: true,
+        preserveState: true,
+        onSuccess: () => {
+            draft.value.prompt = '';
+            draft.value.referenceImageUrls = [];
+
+            // Carry the eye to the result that just appeared. nextTick so the
+            // new card is in the DOM before we measure where to scroll.
+            void nextTick(() => {
+                results.value?.scrollIntoView({
+                    behavior: 'smooth',
+                    block: 'start',
+                });
+            });
+        },
+    });
 }
+
+// A prompt written before signing in, restored after the round trip.
+// In onMounted because it reads sessionStorage, which SSR has no access to.
+onMounted(() => {
+    if (!user.value) {
+        return;
+    }
+
+    const saved = takeDraft();
+
+    if (saved) {
+        draft.value = saved;
+    }
+});
+
+// Poll only while something is still running, so an idle page is silent.
+const hasPending = computed(() =>
+    props.recentMedia.some(
+        (item) => item.status === 'queued' || item.status === 'processing',
+    ),
+);
+
+let timer: ReturnType<typeof setInterval> | null = null;
+
+function stopPolling() {
+    if (timer !== null) {
+        clearInterval(timer);
+        timer = null;
+    }
+}
+
+// Started on mount rather than during setup: timers have no meaning during
+// SSR, and starting one there would run on the server.
+onMounted(() => {
+    watch(
+        hasPending,
+        (pending) => {
+            stopPolling();
+
+            if (pending) {
+                timer = setInterval(() => {
+                    router.reload({ only: ['recentMedia'] });
+                }, 3000);
+            }
+        },
+        { immediate: true },
+    );
+});
+
+onUnmounted(stopPolling);
+
+// Slider state. The arrows are hidden until the rail actually overflows.
+const rail = useTemplateRef<HTMLElement>('rail');
+const canScroll = ref(false);
+const atStart = ref(true);
+const atEnd = ref(false);
+
+function updateScrollState() {
+    const el = rail.value;
+
+    if (!el) {
+        return;
+    }
+
+    canScroll.value = el.scrollWidth > el.clientWidth + 1;
+    atStart.value = el.scrollLeft <= 1;
+    atEnd.value = el.scrollLeft + el.clientWidth >= el.scrollWidth - 1;
+}
+
+function scrollBy(direction: number) {
+    rail.value?.scrollBy({
+        left: direction * (rail.value.clientWidth * 0.8),
+        behavior: 'smooth',
+    });
+}
+
+onMounted(updateScrollState);
+watch(
+    () => props.recentMedia,
+    () => nextTick(updateScrollState),
+    { deep: true },
+);
 </script>
 
 <template>
@@ -166,12 +312,21 @@ function submit(current: GenerationDraft) {
                         <Moon v-else />
                     </Button>
 
-                    <Button v-if="user" as-child>
-                        <Link :href="dashboard()">
-                            Open app
-                            <ArrowRight />
-                        </Link>
-                    </Button>
+                    <DropdownMenu v-if="user">
+                        <DropdownMenuTrigger as-child>
+                            <Button
+                                variant="ghost"
+                                class="h-9 gap-2 px-2"
+                                data-test="user-menu"
+                            >
+                                <UserInfo :user="user" :show-name="false" />
+                                <ChevronDown class="size-4 opacity-60" />
+                            </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent class="w-56" align="end">
+                            <UserMenuContent :user="user" />
+                        </DropdownMenuContent>
+                    </DropdownMenu>
                     <template v-else>
                         <Button variant="ghost" @click="openAuth('login')">
                             Sign in
@@ -213,8 +368,18 @@ function submit(current: GenerationDraft) {
                         :options="options"
                         :estimates="estimates"
                         :max-reference-images="maxReferenceImages"
+                        :processing="form.processing"
                         @submit="submit"
                     />
+
+                    <div
+                        v-if="Object.keys(form.errors).length"
+                        class="mt-3 space-y-1 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-red-600 dark:text-red-400"
+                    >
+                        <p v-for="(error, key) in form.errors" :key="key">
+                            {{ error }}
+                        </p>
+                    </div>
 
                     <div
                         class="mt-4 flex flex-wrap items-center justify-center gap-2 text-xs text-muted-foreground"
@@ -230,6 +395,54 @@ function submit(current: GenerationDraft) {
                             {{ prompt }}
                         </button>
                     </div>
+                </div>
+            </section>
+
+            <section
+                v-if="user && recentMedia.length"
+                ref="results"
+                class="mx-auto max-w-5xl scroll-mt-20 px-4 pb-16 sm:px-6"
+            >
+                <div class="mb-4 flex items-center justify-between gap-4">
+                    <h2 class="text-lg font-semibold tracking-tight">
+                        Your latest generations
+                    </h2>
+
+                    <div v-if="canScroll" class="flex gap-1">
+                        <Button
+                            variant="outline"
+                            size="icon-sm"
+                            aria-label="Scroll back"
+                            :disabled="atStart"
+                            @click="scrollBy(-1)"
+                        >
+                            <ChevronLeft />
+                        </Button>
+                        <Button
+                            variant="outline"
+                            size="icon-sm"
+                            aria-label="Scroll forward"
+                            :disabled="atEnd"
+                            @click="scrollBy(1)"
+                        >
+                            <ChevronRight />
+                        </Button>
+                    </div>
+                </div>
+
+                <!-- A rail rather than a grid: everything stays on this page. -->
+                <div
+                    ref="rail"
+                    class="-mx-4 flex snap-x snap-mandatory gap-4 overflow-x-auto scroll-smooth px-4 pb-2 sm:mx-0 sm:px-0 [&::-webkit-scrollbar]:hidden"
+                    style="scrollbar-width: none"
+                    @scroll="updateScrollState"
+                >
+                    <MediaCard
+                        v-for="item in recentMedia"
+                        :key="item.id"
+                        :item="item"
+                        class="w-64 shrink-0 snap-start sm:w-72"
+                    />
                 </div>
             </section>
 
@@ -378,7 +591,6 @@ function submit(current: GenerationDraft) {
         <AuthDialog
             v-model:open="auth.open"
             v-model:mode="auth.mode"
-            :can-reset-password="canResetPassword"
             :reason="auth.reason"
         />
     </div>

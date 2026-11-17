@@ -27,6 +27,7 @@ class SignupFlowTest extends TestCase
 
         $this->assertAuthenticated();
 
+        $this->get(route('home'))->assertOk();
         $this->get(route('dashboard'))->assertOk();
         $this->get(route('profile.edit'))->assertOk();
     }

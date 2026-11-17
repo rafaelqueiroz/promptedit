@@ -2,13 +2,12 @@
 
 namespace App\Http\Controllers;
 
-use App\Enums\ImageQuality;
-use App\Enums\ImageSize;
-use App\Pricing\PriceTable;
-use App\Pricing\PricingCalculator;
+use App\Http\Resources\MediaResource;
+use App\Services\Media\ComposerOptions;
+use App\Services\Media\MediaHistory;
+use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
-use Laravel\Fortify\Features;
 
 class HomeController extends Controller
 {
@@ -19,21 +18,21 @@ class HomeController extends Controller
         'Watercolor map of an imaginary archipelago with hand-lettered names',
     ];
 
-    public function __invoke(PricingCalculator $pricing): Response
+    public function __invoke(Request $request, ComposerOptions $composer, MediaHistory $history): Response
     {
-        $maxReferenceImages = (int) config('pixelforge.max_reference_images');
+        $user = $request->user();
 
         return Inertia::render('Welcome', [
-            'options' => [
-                'sizes' => array_map(fn (ImageSize $size): array => $size->toOption(), ImageSize::cases()),
-                'qualities' => array_map(fn (ImageQuality $quality): array => $quality->toOption(), ImageQuality::cases()),
-            ],
-            'estimates' => (new PriceTable($pricing, $maxReferenceImages))->build(),
-            'maxReferenceImages' => $maxReferenceImages,
-            // Pixelforge's own default, and the sensible middle option.
-            'defaults' => ['size' => ImageSize::Square->value, 'quality' => ImageQuality::Medium->value],
+            ...$composer->toArray(),
             'samplePrompts' => self::SAMPLE_PROMPTS,
-            'canResetPassword' => Features::enabled(Features::resetPasswords()),
+            // Signed-in visitors generate and see results without leaving the
+            // page, so the landing page is the product rather than an advert
+            // for it.
+            // A plain list, not a resource collection: that would nest the
+            // items under a "data" key the landing page has no use for.
+            'recentMedia' => $user === null
+                ? []
+                : MediaResource::collection($history->recentForUser($user))->resolve(),
         ]);
     }
 }

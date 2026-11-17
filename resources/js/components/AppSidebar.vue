@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Link } from '@inertiajs/vue3';
-import { BookOpen, FolderGit2, LayoutGrid } from '@lucide/vue';
+import { BookOpen, FolderGit2, Images, Sparkles } from '@lucide/vue';
 import AppLogo from '@/components/AppLogo.vue';
 import NavFooter from '@/components/NavFooter.vue';
 import NavMain from '@/components/NavMain.vue';
@@ -14,14 +14,23 @@ import {
     SidebarMenuButton,
     SidebarMenuItem,
 } from '@/components/ui/sidebar';
-import { dashboard } from '@/routes';
+import { dashboard, home } from '@/routes';
 import type { NavItem } from '@/types';
 
+/*
+ * The landing page is the app: users compose, generate and see results there.
+ * These inner pages are secondary, so the nav only offers the way back.
+ */
 const mainNavItems: NavItem[] = [
     {
-        title: 'Dashboard',
+        title: 'Generate',
+        href: home(),
+        icon: Sparkles,
+    },
+    {
+        title: 'Full history',
         href: dashboard(),
-        icon: LayoutGrid,
+        icon: Images,
     },
 ];
 
@@ -45,7 +54,7 @@ const footerNavItems: NavItem[] = [
             <SidebarMenu>
                 <SidebarMenuItem>
                     <SidebarMenuButton size="lg" as-child>
-                        <Link :href="dashboard()">
+                        <Link :href="home()">
                             <AppLogo />
                         </Link>
                     </SidebarMenuButton>

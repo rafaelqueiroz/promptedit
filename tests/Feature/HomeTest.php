@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Media;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Inertia\Testing\AssertableInertia as Assert;
@@ -38,5 +39,34 @@ class HomeTest extends TestCase
             ->get(route('home'))
             ->assertOk()
             ->assertInertia(fn (Assert $page): Assert => $page->component('Welcome'));
+    }
+
+    /**
+     * Signed-in visitors generate and see results without leaving the page.
+     */
+    #[Test]
+    public function it_shows_a_signed_in_users_recent_generations(): void
+    {
+        $user = User::factory()->create();
+        Media::factory()->succeeded()->for($user)->create();
+        Media::factory()->succeeded()->create();
+
+        $this->actingAs($user)
+            ->get(route('home'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page): Assert => $page
+                ->component('Welcome')
+                ->has('recentMedia', 1),
+            );
+    }
+
+    #[Test]
+    public function guests_are_not_given_any_generations(): void
+    {
+        Media::factory()->succeeded()->create();
+
+        $this->get(route('home'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page): Assert => $page->has('recentMedia', 0));
     }
 }

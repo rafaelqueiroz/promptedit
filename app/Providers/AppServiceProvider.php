@@ -2,9 +2,12 @@
 
 namespace App\Providers;
 
+use App\Models\Media;
 use App\Pricing\PricingCalculator;
 use App\Services\Pixelforge\PixelforgeClient;
+use App\Services\Pixelforge\WebhookSignature;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
@@ -31,6 +34,11 @@ class AppServiceProvider extends ServiceProvider
             config('services.pixelforge.key') === null ? null : (string) config('services.pixelforge.key'),
             (int) config('services.pixelforge.timeout'),
         ));
+
+        $this->app->singleton(WebhookSignature::class, fn (): WebhookSignature => new WebhookSignature(
+            (string) config('services.pixelforge.webhook_secret'),
+            (int) config('pixelforge.webhook_tolerance_seconds'),
+        ));
     }
 
     /**
@@ -47,6 +55,12 @@ class AppServiceProvider extends ServiceProvider
     protected function configureDefaults(): void
     {
         Date::use(CarbonImmutable::class);
+
+        // Stable, readable morph keys: renaming or moving a class must not
+        // orphan rows that already point at it.
+        Relation::enforceMorphMap([
+            'media' => Media::class,
+        ]);
 
         DB::prohibitDestructiveCommands(
             app()->isProduction(),
